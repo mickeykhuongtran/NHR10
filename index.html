@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+    <title>Nextwaves UHF RFID Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Inter', 'sans-serif'],
+              mono: ['SFMono-Regular', 'SF Mono', 'Roboto Mono', 'Roboto', 'monospace'],
+            },
+            colors: {
+              cyan: {
+                400: '#22d3ee',
+                500: '#06b6d4',
+                600: '#0891b2',
+                900: '#164e63',
+              },
+              ui: {
+                bg: '#F9FAFB',        /* Light Gray Background */
+                card: '#FFFFFF',      /* White Card */
+                cardHover: '#F3F4F6', /* Gray-100 */
+                border: '#E2E8F0',    /* Slate-200 */
+                text: '#0F172A',      /* Slate-900 */
+                subtext: '#64748B'    /* Slate-500 */
+              }
+            },
+            boxShadow: {
+              'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+              'soft-lg': '0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025)',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      html, body {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        background-color: #F9FAFB;
+        color: #0F172A;
+      }
+
+      /* Subtle Solar Gradient */
+      body::before {
+        content: "";
+        position: absolute;
+        width: 150vw;
+        height: 150vh;
+        top: -50%;
+        left: -20%;
+        background: radial-gradient(circle, rgba(34, 211, 238, 0.03) 0%, rgba(255,255,255,0) 60%);
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #CBD5E1; 
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94A3B8; 
+      }
+
+      .glass-panel {
+        background: #FFFFFF;
+        border-radius: 16px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      }
+      
+      .custom-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: #CBD5E1 transparent;
+      }
+
+      /* Light system theme adapter for legacy dark utility classes. */
+      .bg-slate-950 { background-color: #F5F5F7 !important; }
+      .bg-slate-900,
+      .bg-slate-900\/40,
+      .bg-slate-900\/50 { background-color: rgba(255, 255, 255, 0.86) !important; }
+      .bg-slate-800,
+      .bg-slate-800\/30,
+      .bg-slate-800\/50 { background-color: #F5F5F7 !important; }
+      .bg-cyan-950\/30 { background-color: rgba(0, 122, 255, 0.10) !important; }
+      .bg-purple-950\/30 { background-color: rgba(175, 82, 222, 0.10) !important; }
+      .bg-emerald-950\/30 { background-color: rgba(52, 199, 89, 0.10) !important; }
+      .bg-red-950\/30 { background-color: rgba(255, 59, 48, 0.10) !important; }
+      .bg-black { background-color: #1C1C1E !important; }
+
+      .border-slate-800,
+      .border-slate-800\/30,
+      .border-slate-800\/50,
+      .border-slate-700 { border-color: #D2D2D7 !important; }
+      .border-cyan-900\/50 { border-color: rgba(0, 122, 255, 0.18) !important; }
+      .border-purple-900\/50 { border-color: rgba(175, 82, 222, 0.18) !important; }
+      .border-emerald-900\/50 { border-color: rgba(52, 199, 89, 0.18) !important; }
+      .border-red-900\/50 { border-color: rgba(255, 59, 48, 0.18) !important; }
+
+      .text-slate-100,
+      .text-slate-200,
+      .text-slate-300 { color: #1D1D1F !important; }
+      .text-slate-400 { color: #424245 !important; }
+      .text-slate-500,
+      .text-slate-600,
+      .text-slate-700 { color: #6E6E73 !important; }
+      .text-slate-800 { color: #424245 !important; }
+      .placeholder-slate-700::placeholder { color: #A1A1A6 !important; }
+
+      .hover\:bg-slate-900:hover,
+      .hover\:bg-slate-800:hover,
+      .hover\:bg-slate-800\/30:hover,
+      .hover\:bg-slate-800\/50:hover { background-color: #F5F5F7 !important; }
+      .hover\:text-slate-300:hover,
+      .hover\:text-slate-100:hover { color: #1D1D1F !important; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react-window": "https://esm.sh/react-window@^1.8.10",
+    "react-virtualized-auto-sizer": "https://esm.sh/react-virtualized-auto-sizer@^1.0.24"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="antialiased selection:bg-cyan-100 selection:text-cyan-900">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

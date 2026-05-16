@@ -1,0 +1,5 @@
+{
+  "name": "Nextwaves RFID Scanner",
+  "description": "A Web Bluetooth testing and debugging tool for the Nextwaves Scanner V3 RFID reader.",
+  "requestFramePermissions": []
+}
