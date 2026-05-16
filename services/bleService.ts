@@ -30,12 +30,31 @@ const SERVICE_UUID = 0x00ff;
 const CHAR_CMD_UUID = 0xff01;
 const CHAR_FILE_REQ_UUID = 0xff02;
 const CHAR_FILE_DATA_UUID = 0xff03;
+const JSON_FRAME_START = 0x7B; // '{'
+const LIVE_TAGS_MAGIC_0 = 0x4E; // 'N'
+const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
+const LIVE_TAGS_VERSION = 1;
+const LIVE_TAGS_TYPE = 1;
+
+type LiveTagsPayload = {
+  cmd: 'live_tags';
+  seq: number;
+  d: Array<[string, number, number, number]>;
+};
 
 // Callbacks
 type DataCallback = (data: any) => void;
 type LogCallback = (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void;
-type FileTransferEvent = 'start' | 'progress' | 'complete' | 'error';
+type FileTransferEvent = 'request' | 'start' | 'progress' | 'complete' | 'busy' | 'error';
 type FileTransferCallback = (event: FileTransferEvent, data?: any) => void;
+
+type NhrbStartMetadata = {
+  cmd: 'START';
+  format: 'NHRB';
+  version: number;
+  size: number;
+  chunks: number;
+};
 
 class BLEService {
   private device: BluetoothDevice | null = null;
@@ -51,9 +70,11 @@ class BLEService {
 
   // File Transfer State
   private isFileTransferring = false;
-  private fileBuffer: Uint8Array[] = [];
+  private fileChunks: Map<number, Uint8Array> = new Map();
   private fileTotalSize = 0;
   private fileReceivedSize = 0;
+  private fileExpectedChunks = 0;
+  private fileSeqEndian: 'little' | 'big' | null = null;
 
   // Command Queue to prevent GATT collisions
   private commandQueue: Promise<void> = Promise.resolve();
@@ -136,104 +157,300 @@ class BLEService {
 
   private resetFileState() {
     this.isFileTransferring = false;
-    this.fileBuffer = [];
+    this.fileChunks.clear();
     this.fileTotalSize = 0;
     this.fileReceivedSize = 0;
+    this.fileExpectedChunks = 0;
+    this.fileSeqEndian = null;
   }
 
   private handleCmdNotification(event: Event) {
     const target = event.target as BluetoothRemoteGATTCharacteristic;
-    if (!target.value) return;
+    const view = target.value;
+    if (!view || view.byteLength === 0) return;
 
-    const decoder = new TextDecoder('utf-8');
-    const value = decoder.decode(target.value);
-    
-    // Attempt to parse JSON
-    try {
-        const data = JSON.parse(value);
-        
-        // Pass all parsed JSON to the App to handle
-        if (this.onDataReceived) {
-            this.onDataReceived(data);
-        }
+    const firstByte = view.getUint8(0);
 
-        // Log non-tag commands as RX
-        if (data.cmd !== 'live_tag' && data.cmd !== 'live_tags') {
-             this.log(`RX: ${value}`, 'rx');
-        }
-
-    } catch (e) {
-        this.log(`RX (Raw): ${value}`, 'rx');
+    if (firstByte === JSON_FRAME_START) {
+      this.handleJsonCmdNotification(view);
+      return;
     }
+
+    if (
+      view.byteLength >= 2 &&
+      firstByte === LIVE_TAGS_MAGIC_0 &&
+      view.getUint8(1) === LIVE_TAGS_MAGIC_1
+    ) {
+      const data = this.parseBinaryLiveTags(view);
+      if (data && this.onDataReceived) {
+        this.onDataReceived(data);
+      }
+      return;
+    }
+
+    this.log(`RX (Unknown ${view.byteLength} bytes): ${this.formatHexPreview(view)}`, 'rx');
+  }
+
+  private handleJsonCmdNotification(view: DataView) {
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    const decoder = new TextDecoder('utf-8');
+    const value = decoder.decode(bytes);
+    
+    try {
+      const data = JSON.parse(value);
+
+      if (this.onDataReceived) {
+        this.onDataReceived(data);
+      }
+
+      if (data.cmd !== 'live_tag' && data.cmd !== 'live_tags') {
+        this.log(`RX: ${value}`, 'rx');
+      }
+    } catch (e) {
+      this.log(`RX (Invalid JSON): ${value}`, 'rx');
+    }
+  }
+
+  private parseBinaryLiveTags(view: DataView): LiveTagsPayload | null {
+    if (view.byteLength < 9) {
+      this.log(`RX (Invalid live_tags frame: ${view.byteLength} bytes)`, 'error');
+      return null;
+    }
+
+    const version = view.getUint8(2);
+    const type = view.getUint8(3);
+    if (version !== LIVE_TAGS_VERSION || type !== LIVE_TAGS_TYPE) {
+      this.log(`RX (Unsupported live_tags frame v${version}, type ${type})`, 'error');
+      return null;
+    }
+
+    const seq = view.getUint32(4, true);
+    const itemCount = view.getUint8(8);
+    const d: LiveTagsPayload['d'] = [];
+    let offset = 9;
+
+    for (let i = 0; i < itemCount; i++) {
+      if (offset >= view.byteLength) {
+        this.log(`RX (Invalid live_tags frame: missing item ${i + 1}/${itemCount})`, 'error');
+        return null;
+      }
+
+      const epcLen = view.getUint8(offset);
+      offset += 1;
+
+      const itemBytes = epcLen + 1 + 2 + 4;
+      if (epcLen <= 0 || offset + itemBytes > view.byteLength) {
+        this.log(`RX (Invalid live_tags item ${i + 1}: epc_len=${epcLen})`, 'error');
+        return null;
+      }
+
+      const epcBytes = new Uint8Array(view.buffer, view.byteOffset + offset, epcLen);
+      const epc = this.bytesToHex(epcBytes);
+      offset += epcLen;
+
+      const rssi = view.getInt8(offset);
+      offset += 1;
+
+      const countDelta = view.getUint16(offset, true);
+      offset += 2;
+
+      const totalCount = view.getUint32(offset, true);
+      offset += 4;
+
+      d.push([epc, rssi, countDelta, totalCount]);
+    }
+
+    return { cmd: 'live_tags', seq, d };
+  }
+
+  private bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+
+  private formatHexPreview(view: DataView, maxBytes = 24): string {
+    const byteLength = Math.min(view.byteLength, maxBytes);
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, byteLength);
+    const suffix = view.byteLength > maxBytes ? '...' : '';
+    return `${this.bytesToHex(bytes)}${suffix}`;
   }
 
   private handleFileNotification(event: Event) {
     const target = event.target as BluetoothRemoteGATTCharacteristic;
-    if (!target.value || target.value.byteLength < 2) return;
-    
-    const view = new DataView(target.value.buffer);
-    // Protocol Header is Big-Endian
-    const header = view.getUint16(0, false); 
+    const view = target.value;
+    if (!view || view.byteLength === 0) return;
 
-    if (header === 0xFFFF) {
-        // --- START PACKET ---
-        this.resetFileState();
-        this.isFileTransferring = true;
-
-        // Payload is JSON Metadata
-        const payload = new Uint8Array(target.value.buffer.slice(2));
-        const decoder = new TextDecoder('utf-8');
-        try {
-            const jsonStr = decoder.decode(payload);
-            const metadata = JSON.parse(jsonStr);
-            this.fileTotalSize = metadata.size || 0;
-            
-            if (this.onFileTransfer) {
-                this.onFileTransfer('start', { total: this.fileTotalSize });
-            }
-        } catch (e) {
-            this.log('Failed to parse START packet', 'error');
-            this.isFileTransferring = false;
-            if (this.onFileTransfer) this.onFileTransfer('error', 'Invalid START packet');
-        }
-
-    } else if (header === 0xFFFE) {
-        // --- EOF PACKET ---
-        if (!this.isFileTransferring) return;
-        this.isFileTransferring = false;
-
-        // Assemble all chunks
-        const totalLen = this.fileBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
-        const fullFile = new Uint8Array(totalLen);
-        let offset = 0;
-        for (const chunk of this.fileBuffer) {
-            fullFile.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        // Decode
-        const decoder = new TextDecoder('utf-8');
-        const text = decoder.decode(fullFile);
-        
-        if (this.onFileTransfer) {
-            this.onFileTransfer('complete', text);
-        }
-
-    } else {
-        // --- DATA PACKET ---
-        if (!this.isFileTransferring) return;
-
-        // Header 0x0000 -> 0xFFFD is sequence number, just take payload
-        const chunk = new Uint8Array(target.value.buffer.slice(2));
-        this.fileBuffer.push(chunk);
-        this.fileReceivedSize += chunk.length;
-
-        // Progress
-        if (this.onFileTransfer && this.fileTotalSize > 0) {
-            const percent = Math.min(100, Math.round((this.fileReceivedSize / this.fileTotalSize) * 100));
-            this.onFileTransfer('progress', percent);
-        }
+    if (view.getUint8(0) === JSON_FRAME_START) {
+      this.handleUnframedFileJson(view);
+      return;
     }
+
+    if (view.byteLength < 2) {
+      this.failFileTransfer(`Invalid FF03 frame: ${view.byteLength} bytes`);
+      return;
+    }
+
+    const headerBig = view.getUint16(0, false);
+    const headerLittle = view.getUint16(0, true);
+    const payload = this.copyPayload(view, 2);
+
+    if (headerBig === 0xFFFF) {
+      this.handleFileStartFrame(payload);
+      return;
+    }
+
+    if (headerBig === 0xFFFE || headerLittle === 0xFFFE) {
+      this.handleFileEofFrame(payload);
+      return;
+    }
+
+    this.handleFileDataFrame(headerBig, headerLittle, payload);
+  }
+
+  private handleUnframedFileJson(view: DataView) {
+    const payload = this.copyPayload(view, 0);
+    const data = this.parseJsonPayload(payload);
+
+    if (data?.err === 2 && data?.state === 'busy') {
+      this.log('FF03 busy: device is still saving batch data', 'info');
+      this.resetFileState();
+      this.charFileData?.removeEventListener('characteristicvaluechanged', this.boundFileHandler);
+      if (this.onFileTransfer) this.onFileTransfer('busy', data);
+      return;
+    }
+
+    this.log(`RX (FF03 JSON): ${new TextDecoder('utf-8').decode(payload)}`, 'rx');
+  }
+
+  private handleFileStartFrame(payload: Uint8Array) {
+    this.resetFileState();
+
+    const metadata = this.parseJsonPayload(payload) as Partial<NhrbStartMetadata> | null;
+    if (!metadata || metadata.cmd !== 'START') {
+      this.failFileTransfer('Invalid START packet metadata');
+      return;
+    }
+
+    if (metadata.format !== 'NHRB' || metadata.version !== 1) {
+      this.failFileTransfer(`Unsupported batch file format: ${metadata.format ?? 'unknown'} v${metadata.version ?? 'unknown'}`);
+      return;
+    }
+
+    const size = Number(metadata.size);
+    const chunks = Number(metadata.chunks);
+    if (!Number.isFinite(size) || size < 32 || !Number.isFinite(chunks) || chunks < 0) {
+      this.failFileTransfer('Invalid NHRB START packet size/chunks');
+      return;
+    }
+
+    this.isFileTransferring = true;
+    this.fileTotalSize = Math.trunc(size);
+    this.fileExpectedChunks = Math.trunc(chunks);
+
+    if (this.onFileTransfer) {
+      this.onFileTransfer('start', {
+        format: metadata.format,
+        version: metadata.version,
+        total: this.fileTotalSize,
+        chunks: this.fileExpectedChunks,
+      });
+    }
+  }
+
+  private handleFileDataFrame(seqBig: number, seqLittle: number, payload: Uint8Array) {
+    if (!this.isFileTransferring) return;
+
+    const seq = this.resolveFileSeq(seqBig, seqLittle);
+    const existing = this.fileChunks.get(seq);
+    if (existing) {
+      this.fileReceivedSize -= existing.byteLength;
+    }
+
+    const chunk = payload.slice();
+    this.fileChunks.set(seq, chunk);
+    this.fileReceivedSize += chunk.byteLength;
+
+    if (this.onFileTransfer && this.fileTotalSize > 0) {
+      const percent = Math.min(99, Math.round((this.fileReceivedSize / this.fileTotalSize) * 100));
+      this.onFileTransfer('progress', percent);
+    }
+  }
+
+  private resolveFileSeq(seqBig: number, seqLittle: number): number {
+    const expectedNextSeq = this.fileChunks.size;
+
+    if (this.fileSeqEndian === null) {
+      if (seqLittle === expectedNextSeq && seqBig !== expectedNextSeq) {
+        this.fileSeqEndian = 'little';
+      } else if (seqBig === expectedNextSeq && seqLittle !== expectedNextSeq) {
+        this.fileSeqEndian = 'big';
+      } else if (this.fileExpectedChunks > 0) {
+        if (seqLittle < this.fileExpectedChunks && seqBig >= this.fileExpectedChunks) {
+          this.fileSeqEndian = 'little';
+        } else if (seqBig < this.fileExpectedChunks && seqLittle >= this.fileExpectedChunks) {
+          this.fileSeqEndian = 'big';
+        }
+      }
+    }
+
+    return this.fileSeqEndian === 'big' ? seqBig : seqLittle;
+  }
+
+  private handleFileEofFrame(payload: Uint8Array) {
+    if (!this.isFileTransferring) return;
+
+    const eof = this.parseJsonPayload(payload);
+    if (payload.byteLength > 0 && eof?.cmd !== 'EOF') {
+      this.failFileTransfer('Invalid EOF packet metadata');
+      return;
+    }
+
+    if (this.fileExpectedChunks > 0 && this.fileChunks.size !== this.fileExpectedChunks) {
+      this.failFileTransfer(`Missing file chunks: received ${this.fileChunks.size}/${this.fileExpectedChunks}`);
+      return;
+    }
+
+    const orderedChunks = Array.from(this.fileChunks.entries())
+      .sort(([seqA], [seqB]) => seqA - seqB)
+      .map(([, chunk]) => chunk);
+    const totalLen = orderedChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+
+    if (totalLen !== this.fileTotalSize) {
+      this.failFileTransfer(`NHRB file size mismatch: received ${totalLen}/${this.fileTotalSize}`);
+      return;
+    }
+
+    const fullFile = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of orderedChunks) {
+      fullFile.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    this.resetFileState();
+    this.charFileData?.removeEventListener('characteristicvaluechanged', this.boundFileHandler);
+    if (this.onFileTransfer) {
+      this.onFileTransfer('complete', fullFile);
+    }
+  }
+
+  private copyPayload(view: DataView, offset: number): Uint8Array {
+    return new Uint8Array(view.buffer, view.byteOffset + offset, view.byteLength - offset).slice();
+  }
+
+  private parseJsonPayload(payload: Uint8Array): any | null {
+    try {
+      const jsonStr = new TextDecoder('utf-8').decode(payload);
+      return JSON.parse(jsonStr);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  private failFileTransfer(message: string) {
+    this.log(message, 'error');
+    this.resetFileState();
+    this.charFileData?.removeEventListener('characteristicvaluechanged', this.boundFileHandler);
+    if (this.onFileTransfer) this.onFileTransfer('error', message);
   }
 
   // --- Command Helpers ---
@@ -349,7 +566,7 @@ class BLEService {
     }
 
     try {
-        this.log('Starting file transfer...', 'info');
+        this.log('Requesting batch file...', 'info');
         this.resetFileState();
         this.isFileTransferring = true;
         
@@ -359,7 +576,7 @@ class BLEService {
         await this.charFileData.startNotifications();
         this.charFileData.addEventListener('characteristicvaluechanged', this.boundFileHandler);
         
-        if (this.onFileTransfer) this.onFileTransfer('start');
+        if (this.onFileTransfer) this.onFileTransfer('request');
 
         // Step 3: Write "send_file" to Control Characteristic
         if (!this.charFileReq) throw new Error('File Control Characteristic not found');

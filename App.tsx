@@ -1,11 +1,25 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { bleService } from './services/bleService';
 import { DashboardLayout } from './components/dashboard/DashboardLayout';
-import { Settings, WriteStatus } from './types';
+import { BatchSaveInfo, Settings, WriteStatus } from './types';
 import { useRFIDConnection } from './hooks/useRFIDConnection';
 import { useScanLogic } from './hooks/useScanLogic';
 import { useLocateLogic } from './hooks/useLocateLogic';
 import { useFileTransfer } from './hooks/useFileTransfer';
+
+const DEFAULT_BATCH_SAVE_INFO: BatchSaveInfo = {
+  state: 'idle',
+  progress: 0,
+  written: 0,
+  total: 0,
+};
+
+const toSafeNumber = (value: unknown, fallback = 0): number => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+};
+
+const clampProgress = (value: unknown): number => Math.max(0, Math.min(100, toSafeNumber(value)));
 
 const App: React.FC = () => {
   // --- Hooks ---
@@ -17,6 +31,43 @@ const App: React.FC = () => {
   // --- Operation State (Write) ---
   const [writeStatus, setWriteStatus] = useState<WriteStatus>('idle');
   const [writeMessage, setWriteMessage] = useState('');
+  const [batchSaveInfo, setBatchSaveInfo] = useState<BatchSaveInfo>(DEFAULT_BATCH_SAVE_INFO);
+  const batchSavingTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const isBatchSaving = batchSaveInfo.state === 'saving';
+
+  const clearBatchSavingTimer = useCallback(() => {
+    if (batchSavingTimerRef.current !== null) {
+      window.clearTimeout(batchSavingTimerRef.current);
+      batchSavingTimerRef.current = null;
+    }
+  }, []);
+
+  const markBatchSaving = useCallback((next?: Partial<BatchSaveInfo>, useFallbackTimer = true) => {
+    clearBatchSavingTimer();
+    setBatchSaveInfo((current) => ({
+      state: 'saving',
+      progress: clampProgress(next?.progress ?? current.progress ?? 0),
+      written: Math.max(0, toSafeNumber(next?.written ?? current.written ?? 0)),
+      total: Math.max(0, toSafeNumber(next?.total ?? current.total ?? 0)),
+    }));
+
+    if (useFallbackTimer) {
+      batchSavingTimerRef.current = window.setTimeout(() => {
+        setBatchSaveInfo((current) => current.state === 'saving' ? DEFAULT_BATCH_SAVE_INFO : current);
+        batchSavingTimerRef.current = null;
+      }, 3000);
+    }
+  }, [clearBatchSavingTimer]);
+
+  const clearBatchSaving = useCallback((next?: Partial<BatchSaveInfo>) => {
+    clearBatchSavingTimer();
+    setBatchSaveInfo({
+      state: next?.state ?? 'idle',
+      progress: clampProgress(next?.progress ?? 0),
+      written: Math.max(0, toSafeNumber(next?.written ?? 0)),
+      total: Math.max(0, toSafeNumber(next?.total ?? 0)),
+    });
+  }, [clearBatchSavingTimer]);
 
   // --- Unified Data Handler ---
 const handleDataReceived = useCallback((data: any) => {
@@ -56,7 +107,49 @@ const handleDataReceived = useCallback((data: any) => {
             connection.addLog(`Write Failed: ${data.code}`, 'error');
         }
     }
-  }, [connection, scan, locate]);
+
+    if (data.cmd === 'SAVE' && data.mode === 'batch') {
+      const saveState = String(data.state ?? '').toLowerCase();
+      const nextSaveInfo = {
+        progress: clampProgress(data.progress ?? 0),
+        written: Math.max(0, toSafeNumber(data.written ?? 0)),
+        total: Math.max(0, toSafeNumber(data.total ?? 0)),
+      };
+
+      if (saveState === 'saving') {
+        markBatchSaving(nextSaveInfo, false);
+      } else if (saveState === 'saved') {
+        clearBatchSaving({ state: 'saved', progress: 100, written: nextSaveInfo.written, total: nextSaveInfo.total });
+        connection.addLog('Batch file saved on device', 'info');
+      } else if (saveState === 'save_failed') {
+        clearBatchSaving({ state: 'save_failed', ...nextSaveInfo });
+        connection.addLog(`Batch file save failed at ${nextSaveInfo.progress}%`, 'error');
+      }
+    } else if (data.cmd === 'XB') {
+      const state = String(data.state ?? data.status ?? data.val ?? '').toLowerCase();
+      if (state.includes('saving') || state.includes('busy')) {
+        markBatchSaving();
+      } else if (
+        data.status === 'ok' ||
+        state.includes('saved') ||
+        state.includes('done') ||
+        state.includes('stopped') ||
+        state.includes('idle')
+      ) {
+        clearBatchSaving();
+      }
+    }
+  }, [connection, scan, locate, markBatchSaving, clearBatchSaving]);
+
+  useEffect(() => {
+    if (fileTransfer.transferStatus === 'saving') {
+      markBatchSaving(undefined, false);
+    } else if (fileTransfer.transferStatus === 'transferring' || fileTransfer.transferStatus === 'complete') {
+      clearBatchSaving();
+    }
+  }, [clearBatchSaving, fileTransfer.transferStatus, markBatchSaving]);
+
+  useEffect(() => () => clearBatchSavingTimer(), [clearBatchSavingTimer]);
 
   // --- Setup Service ---
   useEffect(() => {
@@ -232,6 +325,7 @@ const handleDataReceived = useCallback((data: any) => {
       }}
       onStartBatch={scan.startBatch}
       onStopBatch={() => {
+        markBatchSaving();
         scan.stopScan();
         locate.stopLocate(); // Unified stop
       }}
@@ -257,17 +351,26 @@ const handleDataReceived = useCallback((data: any) => {
       onShowPopup={handleShowPopup}
       
       onDownloadLogs={handleDownloadLogs}
-      onFetchHistory={fileTransfer.fetchHistory}
+      onFetchHistory={() => {
+        if (isBatchSaving) {
+          connection.addLog('Batch data is still saving on device. Fetch is temporarily disabled.', 'info');
+          return;
+        }
+        fileTransfer.fetchHistory();
+      }}
       onDownloadJson={fileTransfer.downloadJson}
       onDownloadCsv={fileTransfer.downloadCsv}
       onDownloadTxt={fileTransfer.downloadTxt}
       onShare={fileTransfer.shareFile}
       onClearFileData={fileTransfer.clearFileData}
       historyData={fileTransfer.historyData}
+      isBatchSaving={isBatchSaving}
+      batchSaveInfo={batchSaveInfo}
       
       onClearLogs={connection.clearLogs}
       isFileTransferring={fileTransfer.isFileTransferring}
       transferProgress={fileTransfer.transferProgress}
+      transferStatus={fileTransfer.transferStatus}
     />
   );
 };

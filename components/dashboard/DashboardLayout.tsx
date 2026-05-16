@@ -7,7 +7,7 @@ import { OperationsTab } from './OperationsTab';
 import { SettingsTab } from './SettingsTab';
 import { DebugTab } from './DebugTab';
 import { HistoryTab } from './HistoryTab';
-import { Settings, ConnectionStatus, Tag, LogEntry, ScanStats } from '../../types';
+import { BatchSaveInfo, Settings, ConnectionStatus, Tag, LogEntry, ScanStats, FileTransferStatus } from '../../types';
 
 interface DashboardLayoutProps {
   status: ConnectionStatus;
@@ -41,9 +41,12 @@ interface DashboardLayoutProps {
   onShare: () => void;
   onClearFileData: () => void;
   historyData: any[];
+  isBatchSaving: boolean;
+  batchSaveInfo: BatchSaveInfo;
   onClearLogs: () => void;
   isFileTransferring: boolean;
   transferProgress: number;
+  transferStatus: FileTransferStatus;
   onApplyPreset: (mode: 'standard' | 'quick' | 'deep') => void;
   onSaveConfig: () => void;
   onShowPopup: (content: string, time: number, beep: boolean) => void;
@@ -124,6 +127,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
                 setLocateEpc(epc);
                 setActiveTab(2); // Switch to Locate tab
               }}
+              isBatchSaving={props.isBatchSaving}
+              batchSaveInfo={props.batchSaveInfo}
             />
           )}
           
@@ -158,6 +163,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               historyData={props.historyData}
               isFileTransferring={props.isFileTransferring}
               transferProgress={props.transferProgress}
+              transferStatus={props.transferStatus}
+              isBatchSaving={props.isBatchSaving}
+              batchSaveInfo={props.batchSaveInfo}
             />
           )}
 

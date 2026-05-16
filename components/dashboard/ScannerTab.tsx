@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { Play, Square, Database, Trash2, Activity, FilterX, Search } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { ScanStats, Tag } from '../../types';
+import { BatchSaveInfo, ScanStats, Tag } from '../../types';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeList as List } from 'react-window';
 
@@ -57,6 +57,8 @@ interface ScannerTabProps {
   stats: ScanStats;
   onApplyPreset: (mode: 'standard' | 'quick' | 'deep') => void;
   onLocate: (epc: string) => void;
+  isBatchSaving: boolean;
+  batchSaveInfo: BatchSaveInfo;
 }
 
 export const ScannerTab: React.FC<ScannerTabProps> = ({
@@ -70,7 +72,9 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   tags,
   stats,
   onApplyPreset,
-  onLocate
+  onLocate,
+  isBatchSaving,
+  batchSaveInfo
 }) => {
   const listRef = useRef<List>(null);
   const [activePreset, setActivePreset] = useState<'standard' | 'quick' | 'deep' | null>(null);
@@ -92,6 +96,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   }, [displayedTags]);
 
   const handlePresetClick = (mode: 'standard' | 'quick' | 'deep') => {
+    if (isBatchSaving) return;
     setActivePreset(mode);
     onApplyPreset(mode);
   };
@@ -213,6 +218,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           variant="secondary" 
           size="sm" 
           onClick={() => handlePresetClick('standard')} 
+          disabled={isBatchSaving}
           className={`text-[10px] h-8 transition-colors ${activePreset === 'standard' ? 'bg-[#007AFF]/10 border-[#007AFF]/30 text-[#007AFF]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
         >
           STANDARD (INVENTORY)
@@ -221,6 +227,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           variant="secondary" 
           size="sm" 
           onClick={() => handlePresetClick('quick')} 
+          disabled={isBatchSaving}
           className={`text-[10px] h-8 transition-colors ${activePreset === 'quick' ? 'bg-[#34C759]/10 border-[#34C759]/30 text-[#248A3D]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
         >
           QUICK (RETAIL)
@@ -229,6 +236,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           variant="secondary" 
           size="sm" 
           onClick={() => handlePresetClick('deep')} 
+          disabled={isBatchSaving}
           className={`text-[10px] h-8 transition-colors ${activePreset === 'deep' ? 'bg-[#AF52DE]/10 border-[#AF52DE]/30 text-[#8E44AD]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
         >
           DEEP (INDUSTRIAL)
@@ -241,19 +249,31 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           <Button 
             variant={activeScanType === 'interactive' ? 'danger' : 'success'} 
             onClick={activeScanType === 'interactive' ? onStopScan : onStartScan}
-            disabled={activeScanType === 'batch'}
+            disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
             className="flex-1 md:min-w-[120px] h-8 text-xs"
           >
-            {activeScanType === 'interactive' ? <><Square size={14} fill="currentColor" /> STOP SCAN</> : <><Play size={14} fill="currentColor" /> START SCAN</>}
+            {isBatchSaving && activeScanType !== 'interactive' ? (
+              <><Database size={14} /> SAVING...</>
+            ) : activeScanType === 'interactive' ? (
+              <><Square size={14} fill="currentColor" /> STOP SCAN</>
+            ) : (
+              <><Play size={14} fill="currentColor" /> START SCAN</>
+            )}
           </Button>
           
           <Button 
             variant={activeScanType === 'batch' ? 'danger' : 'secondary'} 
-            onClick={activeScanType === 'batch' ? onStopScan : onStartBatch}
-            disabled={activeScanType === 'interactive'}
+            onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
+            disabled={activeScanType === 'interactive' || isBatchSaving}
             className="flex-1 md:min-w-[120px] h-8 text-xs"
           >
-            {activeScanType === 'batch' ? <><Square size={14} fill="currentColor" /> STOP BATCH</> : <><Database size={14} /> BATCH MODE</>}
+            {isBatchSaving ? (
+              <><Database size={14} /> SAVING {Math.round(batchSaveInfo.progress)}%</>
+            ) : activeScanType === 'batch' ? (
+              <><Square size={14} fill="currentColor" /> STOP BATCH</>
+            ) : (
+              <><Database size={14} /> BATCH MODE</>
+            )}
           </Button>
         </div>
 
@@ -262,7 +282,11 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
         <div className="flex items-center justify-between w-full md:w-auto gap-2 text-[#6E6E73] text-xs font-semibold px-2">
           <div className="flex items-center gap-2">
             <Activity size={14} className={isScanning ? 'text-[#34C759] animate-pulse' : 'text-[#A1A1A6]'} />
-            <span>{displayedTags.length} TAGS</span>
+            <span>
+              {isBatchSaving
+                ? `SAVING ${Math.round(batchSaveInfo.progress)}%`
+                : `${displayedTags.length} TAGS`}
+            </span>
           </div>
           <Button variant="outline" onClick={onClear} size="sm" className="h-8">
             <Trash2 size={14} /> CLEAR

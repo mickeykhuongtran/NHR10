@@ -57,3 +57,19 @@ export interface LogEntry {
 export type WriteStatus = 'idle' | 'pending' | 'success' | 'error';
 
 export type ScanType = 'interactive' | 'batch' | null;
+
+export type FileTransferStatus = 'idle' | 'requesting' | 'saving' | 'transferring' | 'parsing' | 'complete' | 'error';
+
+export interface BatchHistoryRecord {
+  INDEX: number;
+  EPC: string;
+}
+
+export type BatchSaveState = 'idle' | 'saving' | 'saved' | 'save_failed';
+
+export interface BatchSaveInfo {
+  state: BatchSaveState;
+  progress: number;
+  written: number;
+  total: number;
+}
