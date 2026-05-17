@@ -160,6 +160,18 @@ const handleDataReceived = useCallback((data: any) => {
     );
   }, [handleDataReceived, connection.addLog, fileTransfer.handleFileCallback]);
 
+  useEffect(() => {
+    if (connection.status !== 'disconnected' && connection.status !== 'error') return;
+
+    scan.resetScanSession();
+    locate.resetLocateState();
+    clearBatchSaving();
+  }, [clearBatchSaving, connection.status, locate.resetLocateState, scan.resetScanSession]);
+
+  useEffect(() => {
+    connection.setInventoryActive(connection.status === 'connected' && (scan.isScanning || locate.isLocating));
+  }, [connection.setInventoryActive, connection.status, locate.isLocating, scan.isScanning]);
+
   // --- Handlers ---
 
   const handleUpdateSettings = async (key: keyof Settings, value: any) => {

@@ -20,6 +20,7 @@ const calculateBatteryPercent = (mv: number) => {
 export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onDisconnect }) => {
   const isConnected = status === 'connected';
   const batteryPercent = calculateBatteryPercent(settings.battery);
+  const displayDeviceName = settings.deviceInfo.trim() || 'NHR-10';
 
   const getBatteryIcon = (percent: number) => {
     if (percent > 80) return BatteryFull;
@@ -69,7 +70,7 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
             </div>
             <div className="soft-surface hidden lg:flex items-center gap-2 text-[#6E6E73] px-2 py-0.5 rounded-lg text-[10px] font-mono border border-[#52c7da]/20">
               <Info size={12} />
-              <span>{settings.deviceInfo || 'Unknown Device'}</span>
+              <span>{displayDeviceName}</span>
             </div>
           </>
         )}

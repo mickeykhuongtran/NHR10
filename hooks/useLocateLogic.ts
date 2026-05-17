@@ -78,11 +78,17 @@ export const useLocateLogic = (addLog: (msg: string, type: 'info' | 'error' | 'r
     }
   };
 
+  const resetLocateState = useCallback(() => {
+    setIsLocating(false);
+    setTargetRssi(null);
+  }, []);
+
   return {
     isLocating,
     targetRssi,
     startLocate,
     stopLocate,
+    resetLocateState,
     handleDataReceived
   };
 };

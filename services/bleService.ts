@@ -142,11 +142,22 @@ class BLEService {
     if (this.device && this.device.gatt?.connected) {
       this.device.gatt.disconnect();
     }
+    this.clearConnectionState();
   }
 
   handleDisconnect() {
+    if (!this.device && !this.server && !this.service && !this.charCmd) return;
     this.log('Device disconnected.', 'error');
+    this.clearConnectionState();
+  }
+
+  getDeviceName(): string {
+    return this.device?.name ?? '';
+  }
+
+  private clearConnectionState() {
     this.resetFileState();
+    this.commandQueue = Promise.resolve();
     this.device = null;
     this.server = null;
     this.service = null;
@@ -455,6 +466,7 @@ class BLEService {
 
   // --- Command Helpers ---
 
+  async getDeviceInfo() { return this.sendCommand({ cmd: 'DI' }); }
   async getInfo() { return this.sendCommand({ cmd: 'GRI' }); }
   async getPower() { return this.sendCommand({ cmd: 'GP' }); }
   async getProfile() { return this.sendCommand({ cmd: 'GLP' }); }
@@ -528,8 +540,8 @@ class BLEService {
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
 
-    // Append to queue
-    this.commandQueue = this.commandQueue.then(async () => {
+    // Append to queue. Recover from previous write failures so reconnects are not poisoned.
+    this.commandQueue = this.commandQueue.catch(() => undefined).then(async () => {
       try {
         this.log(`TX: ${str}`, 'tx');
         if (this.charCmd) {

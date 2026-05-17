@@ -65,6 +65,14 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
     setStats(DEFAULT_SCAN_STATS);
   }, []);
 
+  const resetScanSession = useCallback(() => {
+    resetScanData();
+    setIsScanning(false);
+    setActiveScanType(null);
+    setScanStartedAt(null);
+    setScanStoppedAt(null);
+  }, [resetScanData]);
+
   const setStaleRemoveMs = useCallback((value: number) => {
     setStaleRemoveMsState(normalizeRemoveMs(value));
   }, []);
@@ -292,6 +300,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
     stopScan,
     startBatch,
     clearTags,
+    resetScanSession,
     handleDataReceived
   };
 };

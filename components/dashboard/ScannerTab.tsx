@@ -670,7 +670,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 bg-transparent p-2 sm:p-3 md:p-5">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5 lg:overflow-hidden">
       <section className="soft-glass rounded-lg">
         <div className="flex flex-col gap-3 border-b border-[#DDECEF]/75 p-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
@@ -769,7 +769,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
         </div>
       </section>
 
-      <section className="soft-glass flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg">
+      <section className="soft-glass flex min-h-[26rem] flex-none flex-col overflow-hidden rounded-lg lg:min-h-0 lg:flex-1">
         <div className="flex flex-col gap-2 border-b border-[#DDECEF]/75 bg-white/36 px-2 py-2 backdrop-blur-xl sm:px-3 md:flex-row md:items-center md:justify-between">
           <div className="soft-surface relative inline-grid w-full grid-cols-2 rounded-md border border-[#52c7da]/20 p-1 sm:w-auto sm:min-w-[216px]">
             <span
@@ -871,7 +871,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           </div>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="relative h-[22rem] flex-none overflow-hidden sm:h-[28rem] lg:h-auto lg:min-h-0 lg:flex-1">
           <div
             className="flex h-full transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
             style={scannerPanelTrackStyle}
