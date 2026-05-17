@@ -11,6 +11,7 @@ const DESKTOP_TABLE_MIN_WIDTH = 1000;
 const TABLET_TABLE_MIN_WIDTH = 740;
 const DESKTOP_TAG_TABLE_COLUMNS = '52px minmax(20rem, 1fr) 156px 92px 116px 116px 132px';
 const TABLET_TAG_TABLE_COLUMNS = '44px minmax(13rem, 1fr) 120px 78px 108px 118px';
+const MOBILE_TAG_ITEM_SIZE = 176;
 const TIMER_UPDATE_INTERVAL_MS = 100;
 const PRESET_OPTIONS = [
   {
@@ -394,7 +395,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
   const tableVariant: TableVariant = viewportMode === 'desktop' ? 'desktop' : 'tablet';
   const activeTableMinWidth = tableVariant === 'desktop' ? DESKTOP_TABLE_MIN_WIDTH : TABLET_TABLE_MIN_WIDTH;
-  const listItemSize = viewportMode === 'phone' ? 150 : 44;
+  const listItemSize = viewportMode === 'phone' ? MOBILE_TAG_ITEM_SIZE : 44;
   const applyStaleRemoveUnits = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 3);
     setStaleRemoveUnitsInput(digits);
@@ -472,7 +473,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
       <button
         type="button"
         className={`inline-flex items-center justify-center gap-1 rounded-md border border-[#52c7da]/38 bg-white/48 text-[10px] font-semibold text-[#166B78] backdrop-blur-md hover:bg-white/78 ${
-          compact ? 'h-9 w-full' : 'h-7 px-2'
+          compact ? 'h-7 shrink-0 rounded-full px-2' : 'h-7 px-2'
         }`}
         onPointerDown={(event) => {
           event.preventDefault();
@@ -544,7 +545,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
 
   const MobileMetric = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="rounded-md border border-[#DDECEF]/80 bg-white/52 px-2 py-1.5">
+    <div className="min-h-[42px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
       <p className="text-[9px] font-bold uppercase tracking-wide text-[#7A8E92]">{label}</p>
       <div className="mt-0.5 font-mono text-xs font-bold text-[#166B78]">{children}</div>
     </div>
@@ -570,15 +571,16 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           ...style,
           boxSizing: 'border-box',
           opacity: rowOpacity,
-          padding: '5px 8px',
+          padding: '6px 9px',
         }}
       >
-        <div className="soft-table-row flex h-full flex-col gap-2 rounded-lg border border-[#DDECEF]/80 p-3 text-xs shadow-sm shadow-[#124E5A]/5">
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-7 shrink-0 items-center justify-center rounded-md bg-[#F3FCFE] font-mono text-[11px] font-bold text-[#7A8E92]">
+        <div className="soft-table-row box-border flex h-full flex-col gap-2 rounded-lg border border-[#BFEFF6] bg-white/72 p-3 text-xs shadow-[0_8px_24px_rgba(18,78,90,0.08)]">
+          <div className="flex min-w-0 items-center gap-2 border-b border-[#DDECEF]/80 pb-2">
+            <span className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md bg-[#E7F9FC] font-mono text-[11px] font-bold text-[#166B78] ring-1 ring-[#52c7da]/25">
               {index + 1}
             </span>
-            <EpcCell className="pr-0" epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
+            <EpcCell className="flex-1 pr-0" epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
+            <TagActionButton action={action} compact epc={tag.epc} />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -587,8 +589,6 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
             <MobileMetric label="1st Seen">{formatClock(tag.firstSeen ?? tag.timestamp)}</MobileMetric>
             <MobileMetric label="Last Seen">{formatClock(tag.lastSeen)}</MobileMetric>
           </div>
-
-          <TagActionButton action={action} compact epc={tag.epc} />
         </div>
       </div>
     );
