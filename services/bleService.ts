@@ -19,9 +19,20 @@ interface BluetoothRemoteGATTService {
   getCharacteristic(characteristic: string | number): Promise<BluetoothRemoteGATTCharacteristic>;
 }
 
+interface BluetoothCharacteristicProperties {
+  read?: boolean;
+  write?: boolean;
+  writeWithoutResponse?: boolean;
+  notify?: boolean;
+  indicate?: boolean;
+}
+
 interface BluetoothRemoteGATTCharacteristic extends EventTarget {
+  properties?: BluetoothCharacteristicProperties;
   value?: DataView;
   writeValue(value: BufferSource): Promise<void>;
+  writeValueWithResponse?(value: BufferSource): Promise<void>;
+  writeValueWithoutResponse?(value: BufferSource): Promise<void>;
   startNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
 }
 // --------------------------------------
@@ -36,6 +47,7 @@ const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
 const LIVE_TAGS_VERSION = 1;
 const LIVE_TAGS_TYPE = 1;
 const LIVE_TAGS_DELIVERY_INTERVAL_MS = 100;
+const COMMAND_WRITE_GAP_MS = 85;
 
 type LiveTagsItem = [string, number, number, number];
 type LiveTagsPayload = {
@@ -63,6 +75,8 @@ type NhrbStartMetadata = {
   chunks: number;
 };
 
+const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 class BLEService {
   private device: BluetoothDevice | null = null;
   private server: BluetoothRemoteGATTServer | null = null;
@@ -85,6 +99,7 @@ class BLEService {
 
   // Command Queue to prevent GATT collisions
   private commandQueue: Promise<void> = Promise.resolve();
+  private lastCommandWriteAt = 0;
   private acceptLiveTags = false;
   private liveTagsFlushTimer: number | null = null;
   private liveTagsLastFlushAt = 0;
@@ -129,6 +144,7 @@ class BLEService {
       this.charCmd = await this.service.getCharacteristic(CHAR_CMD_UUID);
       this.charFileReq = await this.service.getCharacteristic(CHAR_FILE_REQ_UUID);
       this.charFileData = await this.service.getCharacteristic(CHAR_FILE_DATA_UUID);
+      this.log(`FF01 properties: ${this.formatCharacteristicProperties(this.charCmd)}`, 'info');
 
       // Setup Notifications for Commands/Tags
       this.log('Starting Notifications...', 'info');
@@ -190,6 +206,7 @@ class BLEService {
   private clearConnectionState() {
     this.resetFileState();
     this.commandQueue = Promise.resolve();
+    this.lastCommandWriteAt = 0;
     this.acceptLiveTags = false;
     this.clearPendingLiveTags();
     this.device = null;
@@ -576,6 +593,57 @@ class BLEService {
     if (this.onFileTransfer) this.onFileTransfer('error', message);
   }
 
+  private formatCharacteristicProperties(characteristic: BluetoothRemoteGATTCharacteristic | null): string {
+    const props = characteristic?.properties;
+    if (!props) return 'unknown';
+
+    const enabled = [
+      props.read ? 'read' : '',
+      props.write ? 'write' : '',
+      props.writeWithoutResponse ? 'writeWithoutResponse' : '',
+      props.notify ? 'notify' : '',
+      props.indicate ? 'indicate' : '',
+    ].filter(Boolean);
+
+    return enabled.length > 0 ? enabled.join(',') : 'none';
+  }
+
+  private async writeCharacteristicValue(
+    characteristic: BluetoothRemoteGATTCharacteristic,
+    data: Uint8Array,
+  ): Promise<string> {
+    const props = characteristic.properties;
+    const canWriteWithResponse = props?.write !== false && typeof characteristic.writeValueWithResponse === 'function';
+    const canWriteWithoutResponse = props?.writeWithoutResponse !== false && typeof characteristic.writeValueWithoutResponse === 'function';
+
+    if (props?.write && typeof characteristic.writeValueWithResponse === 'function') {
+      await characteristic.writeValueWithResponse(data);
+      return 'writeWithResponse';
+    }
+
+    if (props?.writeWithoutResponse && !props.write && typeof characteristic.writeValueWithoutResponse === 'function') {
+      await characteristic.writeValueWithoutResponse(data);
+      return 'writeWithoutResponse';
+    }
+
+    if (canWriteWithResponse) {
+      try {
+        await characteristic.writeValueWithResponse!(data);
+        return 'writeWithResponse';
+      } catch (error) {
+        if (!canWriteWithoutResponse) throw error;
+      }
+    }
+
+    if (canWriteWithoutResponse) {
+      await characteristic.writeValueWithoutResponse!(data);
+      return 'writeWithoutResponse';
+    }
+
+    await characteristic.writeValue(data);
+    return 'writeValue';
+  }
+
   // --- Command Helpers ---
 
   async getDeviceInfo() { return this.sendCommand({ cmd: 'DI' }); }
@@ -674,9 +742,15 @@ class BLEService {
     // Append to queue. Recover from previous write failures so reconnects are not poisoned.
     this.commandQueue = this.commandQueue.catch(() => undefined).then(async () => {
       try {
-        this.log(`TX: ${str}`, 'tx');
         if (this.charCmd) {
-          await this.charCmd.writeValue(data);
+          const elapsedSinceLastWrite = Date.now() - this.lastCommandWriteAt;
+          if (elapsedSinceLastWrite < COMMAND_WRITE_GAP_MS) {
+            await wait(COMMAND_WRITE_GAP_MS - elapsedSinceLastWrite);
+          }
+
+          const mode = await this.writeCharacteristicValue(this.charCmd, data);
+          this.lastCommandWriteAt = Date.now();
+          this.log(`TX (${mode}, ${data.byteLength}B): ${str}`, 'tx');
         }
       } catch (error: any) {
         this.log(`TX Failed: ${error.message}`, 'error');

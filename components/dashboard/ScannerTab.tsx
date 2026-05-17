@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { Play, Square, Database, FilterX, RotateCcw, Copy, Check, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BatchSaveInfo, ScanStats, Tag } from '../../types';
@@ -203,6 +204,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   const [staleRemoveUnitsInput, setStaleRemoveUnitsInput] = useState(() => formatStaleRemoveUnits(staleRemoveMs));
   const [isEditingStaleRemoveMs, setIsEditingStaleRemoveMs] = useState(false);
   const primaryScanActionAtRef = useRef(0);
+  const scannerPanelActionAtRef = useRef(0);
 
   const excludedSet = useMemo(() => new Set(excludedEpcs), [excludedEpcs]);
   const tagsByEpc = useMemo(() => new Map(tags.map((tag) => [tag.epc, tag])), [tags]);
@@ -373,6 +375,37 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
 
     onStartScan();
   }, [activeScanType, onStartScan, onStopScan]);
+
+  const switchScannerPanel = useCallback((panel: 'live' | 'excluded', source: 'early' | 'click') => {
+    const now = Date.now();
+    if (source === 'click' && now - scannerPanelActionAtRef.current < 650) {
+      return;
+    }
+
+    if (source === 'early') {
+      if (now - scannerPanelActionAtRef.current < 250) {
+        return;
+      }
+      scannerPanelActionAtRef.current = now;
+    }
+
+    flushSync(() => {
+      setScannerPanel(panel);
+    });
+  }, []);
+
+  const getScannerPanelHandlers = useCallback((panel: 'live' | 'excluded') => ({
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === 'mouse') return;
+      event.preventDefault();
+      switchScannerPanel(panel, 'early');
+    },
+    onTouchStart: (event: React.TouchEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      switchScannerPanel(panel, 'early');
+    },
+    onClick: () => switchScannerPanel(panel, 'click'),
+  }), [switchScannerPanel]);
 
   const renderScanActionButtons = (isMobileSticky = false) => (
     <>
@@ -896,14 +929,14 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
             <button
               type="button"
               className={`relative z-10 h-9 px-2 text-xs font-semibold transition-colors focus:outline-none sm:h-8 sm:px-3 ${scannerPanel === 'live' ? 'text-[#166B78]' : 'text-[#52666B] hover:text-[#166B78]'}`}
-              onClick={() => setScannerPanel('live')}
+              {...getScannerPanelHandlers('live')}
             >
               LIVE TAGS {displayedTags.length}
             </button>
             <button
               type="button"
               className={`relative z-10 h-9 px-2 text-xs font-semibold transition-colors focus:outline-none sm:h-8 sm:px-3 ${scannerPanel === 'excluded' ? 'text-[#166B78]' : 'text-[#52666B] hover:text-[#166B78]'}`}
-              onClick={() => setScannerPanel('excluded')}
+              {...getScannerPanelHandlers('excluded')}
             >
               EXCLUDED {excludedTags.length}
             </button>

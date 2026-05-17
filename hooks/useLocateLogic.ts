@@ -63,16 +63,6 @@ export const useLocateLogic = (addLog: (msg: string, type: 'info' | 'error' | 'r
       setIsLocating(false);
       setTargetRssi(null);
       addLog('Locating Stopped', 'info');
-      
-      // Sync state after 1s
-      setTimeout(async () => {
-         try {
-             await bleService.getQSession();
-             await bleService.getProfile();
-             addLog('Synced Settings after Locate', 'info');
-         } catch (e) { console.error(e); }
-      }, 1000);
-
     } catch (e: any) {
       addLog(`Stop Locate Error: ${e.message}`, 'error');
     }

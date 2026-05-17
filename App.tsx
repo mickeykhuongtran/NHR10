@@ -252,16 +252,6 @@ const handleDataReceived = useCallback((data: any) => {
         await bleService.setTagFocus(true);
         connection.addLog('Applied Deep Scan Mode', 'info');
       }
-      
-      // Sync settings back after a short delay
-      setTimeout(async () => {
-          try {
-            await bleService.getProfile();
-            await bleService.getQSession();
-            await bleService.getTagFocus();
-            await bleService.getInfo(); // Just to be sure
-          } catch (e) { console.error(e); }
-      }, 500);
     } catch (e: any) {
       connection.addLog(`Failed to apply preset: ${e.message}`, 'error');
     }

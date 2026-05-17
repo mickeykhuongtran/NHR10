@@ -55,26 +55,36 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
 
   useEffect(() => {
     setPower(settings.power);
+  }, [settings.power]);
+
+  useEffect(() => {
     setProfile(normalizeProfileValue(settings.linkProfile));
+  }, [settings.linkProfile]);
+
+  useEffect(() => {
     setQValue(settings.qValue);
+  }, [settings.qValue]);
+
+  useEffect(() => {
     setSession(settings.session);
+  }, [settings.session]);
+
+  useEffect(() => {
     setTagFocus(settings.tagFocus);
-    if (settings.scanParams) {
-      setQueryInterval(settings.scanParams.interval);
-      setDwell(settings.scanParams.dwell);
-      setAppend(settings.scanParams.append || 0);
-    }
-  }, [settings]);
+  }, [settings.tagFocus]);
+
+  useEffect(() => {
+    if (!settings.scanParams) return;
+
+    setQueryInterval(settings.scanParams.interval);
+    setDwell(settings.scanParams.dwell);
+    setAppend(settings.scanParams.append || 0);
+  }, [settings.scanParams?.append, settings.scanParams?.dwell, settings.scanParams?.interval]);
 
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
   const handleGetProfile = () => bleService.getProfile();
-  const handleSetProfile = async () => {
-    await bleService.setLinkProfile(profile);
-    window.setTimeout(() => {
-      void bleService.getProfile();
-    }, 150);
-  };
+  const handleSetProfile = () => bleService.setLinkProfile(profile);
   const handleGetQSession = () => bleService.getQSession();
   const handleSetQSession = () => bleService.setQSession(qValue, session);
   const handleGetQueryParams = () => bleService.getQueryParam();
