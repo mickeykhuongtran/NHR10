@@ -5,6 +5,7 @@ import { ScanStats, Tag, ScanType, TagVisibility } from '../types';
 const TAG_ACTIVE_MS = 1200;
 const DEFAULT_TAG_REMOVE_MS = 3000;
 const TAG_RENDER_INTERVAL_MS = 500;
+const STOP_COMMAND_RETRY_DELAY_MS = 150;
 
 const DEFAULT_SCAN_STATS: ScanStats = {
   visibleTags: 0,
@@ -33,6 +34,8 @@ const getTagFreshness = (lastSeen: number, now: number, fadeWindowMs: number): n
   return Math.max(0, Math.min(1, 1 - (ageMs / fadeWindowMs)));
 };
 
+const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void) => {
   const [isScanning, setIsScanning] = useState(false);
   const [activeScanType, setActiveScanType] = useState<ScanType>(null);
@@ -51,6 +54,9 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   const windowReadsRef = useRef(0);
   const windowUniqueRef = useRef(0);
   const statsLastAtRef = useRef(Date.now());
+  const isScanningRef = useRef(false);
+  const activeScanTypeRef = useRef<ScanType>(null);
+  const stopRequestedRef = useRef(true);
 
   const resetScanData = useCallback(() => {
     const now = Date.now();
@@ -66,6 +72,9 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   }, []);
 
   const resetScanSession = useCallback(() => {
+    stopRequestedRef.current = true;
+    isScanningRef.current = false;
+    activeScanTypeRef.current = null;
     resetScanData();
     setIsScanning(false);
     setActiveScanType(null);
@@ -182,6 +191,10 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   }, [requestPublish]);
 
   const handleDataReceived = useCallback((data: any) => {
+    if (stopRequestedRef.current || !isScanningRef.current) {
+      return;
+    }
+
     if (data.cmd !== 'live_tags' || !Array.isArray(data.d)) {
       return;
     }
@@ -237,48 +250,95 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
 
   const startScan = async () => {
     try {
+      stopRequestedRef.current = true;
+      isScanningRef.current = false;
+      activeScanTypeRef.current = null;
       resetScanData();
       setScanStartedAt(null);
       setScanStoppedAt(null);
       await bleService.startScan();
       const startedAt = Date.now();
+      stopRequestedRef.current = false;
+      isScanningRef.current = true;
+      activeScanTypeRef.current = 'interactive';
       setIsScanning(true);
       setActiveScanType('interactive');
       setScanStartedAt(startedAt);
       setScanStoppedAt(null);
       addLog('Scanning Started', 'info');
-    } catch (e: any) { addLog(e.message, 'error'); }
+    } catch (e: any) {
+      stopRequestedRef.current = true;
+      isScanningRef.current = false;
+      activeScanTypeRef.current = null;
+      addLog(e.message, 'error');
+    }
   };
 
   const stopScan = async () => {
-    try {
-      if (activeScanType === 'batch') {
+    const stopType = activeScanTypeRef.current ?? activeScanType;
+    const wasScanning = isScanningRef.current || isScanning || stopType !== null;
+    if (!wasScanning) {
+      stopRequestedRef.current = true;
+      isScanningRef.current = false;
+      activeScanTypeRef.current = null;
+      return;
+    }
+
+    const stoppedAt = Date.now();
+    stopRequestedRef.current = true;
+    isScanningRef.current = false;
+    activeScanTypeRef.current = null;
+    setIsScanning(false);
+    setActiveScanType(null);
+    setScanStoppedAt(stoppedAt);
+
+    const sendStopCommand = async () => {
+      if (stopType === 'batch') {
         await bleService.stopBatch();
-        addLog('Batch Mode Stopped', 'info');
-      } else {
-        await bleService.stopScan();
-        addLog('Scanning Stopped', 'info');
+        return;
       }
-      const stoppedAt = Date.now();
-      setIsScanning(false);
-      setActiveScanType(null);
-      setScanStoppedAt(stoppedAt);
-    } catch (e: any) { addLog(e.message, 'error'); }
+
+      await bleService.stopScan();
+    };
+
+    try {
+      await sendStopCommand();
+      addLog(stopType === 'batch' ? 'Batch Mode Stopped' : 'Scanning Stopped', 'info');
+    } catch (firstError: any) {
+      try {
+        await wait(STOP_COMMAND_RETRY_DELAY_MS);
+        await sendStopCommand();
+        addLog(stopType === 'batch' ? 'Batch Mode Stopped after retry' : 'Scanning Stopped after retry', 'info');
+      } catch (secondError: any) {
+        addLog(`Stop command failed: ${secondError?.message ?? firstError?.message ?? 'Unknown error'}`, 'error');
+      }
+    }
   };
 
   const startBatch = async () => {
     try {
+      stopRequestedRef.current = true;
+      isScanningRef.current = false;
+      activeScanTypeRef.current = null;
       resetScanData();
       setScanStartedAt(null);
       setScanStoppedAt(null);
       await bleService.startBatch();
       const startedAt = Date.now();
+      stopRequestedRef.current = false;
+      isScanningRef.current = true;
+      activeScanTypeRef.current = 'batch';
       setIsScanning(true);
       setActiveScanType('batch');
       setScanStartedAt(startedAt);
       setScanStoppedAt(null);
       addLog('Batch Mode Started', 'info');
-    } catch (e: any) { addLog(e.message, 'error'); }
+    } catch (e: any) {
+      stopRequestedRef.current = true;
+      isScanningRef.current = false;
+      activeScanTypeRef.current = null;
+      addLog(e.message, 'error');
+    }
   };
 
   const clearTags = () => {

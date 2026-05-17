@@ -11,7 +11,7 @@ const DESKTOP_TABLE_MIN_WIDTH = 1000;
 const TABLET_TABLE_MIN_WIDTH = 740;
 const DESKTOP_TAG_TABLE_COLUMNS = '52px minmax(20rem, 1fr) 156px 92px 116px 116px 132px';
 const TABLET_TAG_TABLE_COLUMNS = '44px minmax(13rem, 1fr) 120px 78px 108px 118px';
-const MOBILE_TAG_ITEM_SIZE = 176;
+const MOBILE_TAG_ITEM_SIZE = 204;
 const TIMER_UPDATE_INTERVAL_MS = 100;
 const PRESET_OPTIONS = [
   {
@@ -545,9 +545,52 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
 
   const MobileMetric = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="min-h-[42px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
+    <div className="min-h-[40px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
       <p className="text-[9px] font-bold uppercase tracking-wide text-[#7A8E92]">{label}</p>
       <div className="mt-0.5 font-mono text-xs font-bold text-[#166B78]">{children}</div>
+    </div>
+  );
+
+  const MobileEpcCell = ({
+    epc,
+    isCopied,
+    onCopy,
+  }: {
+    epc: string;
+    isCopied: boolean;
+    onCopy: (epc: string) => void;
+  }) => (
+    <div className="group/epc flex min-w-0 items-start gap-2 rounded-md bg-[#F3FCFE]/62 px-2 py-1.5 ring-1 ring-[#52c7da]/18" title={epc}>
+      <span className="min-w-0 flex-1 select-text break-all font-mono text-[12px] font-bold leading-4 tracking-wide text-[#0C4F5B]">
+        {epc}
+      </span>
+      <button
+        type="button"
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-[#52c7da]/35 ${
+          isCopied
+            ? 'text-[#166B78] opacity-100'
+            : 'text-[#8E8E93] opacity-35 hover:bg-white/78 hover:text-[#52666B] hover:opacity-90 group-hover/epc:opacity-55'
+        }`}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onCopy(epc);
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          onCopy(epc);
+        }}
+        title={isCopied ? 'Copied EPC' : 'Copy EPC'}
+        aria-label={isCopied ? 'Copied EPC' : `Copy EPC ${epc}`}
+      >
+        {isCopied ? <Check size={14} strokeWidth={1.9} /> : <Copy size={14} strokeWidth={1.7} />}
+      </button>
     </div>
   );
 
@@ -575,13 +618,14 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
         }}
       >
         <div className="soft-table-row box-border flex h-full flex-col gap-2 rounded-lg border border-[#BFEFF6] bg-white/72 p-3 text-xs shadow-[0_8px_24px_rgba(18,78,90,0.08)]">
-          <div className="flex min-w-0 items-center gap-2 border-b border-[#DDECEF]/80 pb-2">
+          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-[#DDECEF]/80 pb-2">
             <span className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md bg-[#E7F9FC] font-mono text-[11px] font-bold text-[#166B78] ring-1 ring-[#52c7da]/25">
               {index + 1}
             </span>
-            <EpcCell className="flex-1 pr-0" epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
             <TagActionButton action={action} compact epc={tag.epc} />
           </div>
+
+          <MobileEpcCell epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
 
           <div className="grid grid-cols-2 gap-2">
             <MobileMetric label="Signal"><SignalCell compact tag={tag} /></MobileMetric>

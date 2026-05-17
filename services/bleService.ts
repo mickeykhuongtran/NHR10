@@ -83,6 +83,7 @@ class BLEService {
 
   // Command Queue to prevent GATT collisions
   private commandQueue: Promise<void> = Promise.resolve();
+  private acceptLiveTags = false;
 
   // Bound handler for file notifications
   private boundFileHandler = this.handleFileNotification.bind(this);
@@ -183,6 +184,7 @@ class BLEService {
   private clearConnectionState() {
     this.resetFileState();
     this.commandQueue = Promise.resolve();
+    this.acceptLiveTags = false;
     this.device = null;
     this.server = null;
     this.service = null;
@@ -217,6 +219,10 @@ class BLEService {
       firstByte === LIVE_TAGS_MAGIC_0 &&
       view.getUint8(1) === LIVE_TAGS_MAGIC_1
     ) {
+      if (!this.acceptLiveTags) {
+        return;
+      }
+
       const data = this.parseBinaryLiveTags(view);
       if (data && this.onDataReceived) {
         this.onDataReceived(data);
@@ -234,6 +240,10 @@ class BLEService {
     
     try {
       const data = JSON.parse(value);
+
+      if ((data.cmd === 'live_tag' || data.cmd === 'live_tags') && !this.acceptLiveTags) {
+        return;
+      }
 
       if (this.onDataReceived) {
         this.onDataReceived(data);
@@ -530,11 +540,29 @@ class BLEService {
   async setTagFocus(enable: boolean) { return this.sendCommand({ cmd: 'TF', val: enable ? 1 : 0 }); }
   async saveTagFocus(enable: boolean) { return this.sendCommand({ cmd: 'STF', val: enable ? 1 : 0 }); }
   
-  async startScan() { return this.sendCommand({ cmd: 'S' }); }
-  async stopScan() { return this.sendCommand({ cmd: 'X' }); }
+  async startScan() {
+    this.acceptLiveTags = true;
+    try {
+      await this.sendCommand({ cmd: 'S' });
+    } catch (error) {
+      this.acceptLiveTags = false;
+      throw error;
+    }
+  }
+
+  async stopScan() {
+    this.acceptLiveTags = false;
+    return this.sendCommand({ cmd: 'X' });
+  }
   
-  async startBatch() { return this.sendCommand({ cmd: 'SB' }); }
-  async stopBatch() { return this.sendCommand({ cmd: 'XB' }); }
+  async startBatch() {
+    this.acceptLiveTags = false;
+    return this.sendCommand({ cmd: 'SB' });
+  }
+  async stopBatch() {
+    this.acceptLiveTags = false;
+    return this.sendCommand({ cmd: 'XB' });
+  }
 
   // Deprecated: SMASK is removed in V12.1+
   // async setMask(epc: string) { return this.sendCommand({ cmd: 'SMASK', epc }); }
