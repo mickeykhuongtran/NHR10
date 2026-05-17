@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import { Play, Square, Database, FilterX, RotateCcw, Copy, Check } from 'lucide-react';
+import { Play, Square, Database, FilterX, RotateCcw, Copy, Check, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BatchSaveInfo, ScanStats, Tag } from '../../types';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -80,7 +80,7 @@ const formatClock = (timestamp?: number) => {
   });
 };
 
-const formatDuration = (durationMs: number) => {
+const getDurationParts = (durationMs: number) => {
   const safeDuration = Math.max(0, Math.floor(durationMs));
   const totalSeconds = Math.floor(safeDuration / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -88,11 +88,17 @@ const formatDuration = (durationMs: number) => {
   const seconds = totalSeconds % 60;
   const milliseconds = safeDuration % 1000;
 
-  return [
-    ...[hours, minutes, seconds].map((value) => String(value).padStart(2, '0')),
-    String(milliseconds).padStart(3, '0'),
-  ].join(':');
+  return {
+    hours: String(hours).padStart(2, '0'),
+    minutes: String(minutes).padStart(2, '0'),
+    seconds: String(seconds).padStart(2, '0'),
+    milliseconds: String(milliseconds).padStart(3, '0'),
+  };
 };
+
+const formatStaleRemoveUnits = (valueMs: number) => (
+  String(clamp(Math.round(valueMs / 100), 1, 600))
+);
 
 const EpcCell = React.memo(({
   className = 'pr-4',
@@ -183,6 +189,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   batchSaveInfo
 }) => {
   const listRef = useRef<List>(null);
+  const staleRemoveInputRef = useRef<HTMLInputElement>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const [activePreset, setActivePreset] = useState<ScanPresetMode>('standard');
   const [scannerPanel, setScannerPanel] = useState<'live' | 'excluded'>('live');
@@ -192,6 +199,8 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   const [runtimeNow, setRuntimeNow] = useState(Date.now());
   const [rateHistory, setRateHistory] = useState<number[]>([]);
   const [viewportMode, setViewportMode] = useState<ViewportMode>(() => getViewportMode());
+  const [staleRemoveUnitsInput, setStaleRemoveUnitsInput] = useState(() => formatStaleRemoveUnits(staleRemoveMs));
+  const [isEditingStaleRemoveMs, setIsEditingStaleRemoveMs] = useState(false);
 
   const excludedSet = useMemo(() => new Set(excludedEpcs), [excludedEpcs]);
   const tagsByEpc = useMemo(() => new Map(tags.map((tag) => [tag.epc, tag])), [tags]);
@@ -257,6 +266,12 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   useEffect(() => {
     setExcludedSnapshots({});
   }, [scanStartedAt]);
+
+  useEffect(() => {
+    if (!isEditingStaleRemoveMs && staleRemoveUnitsInput !== '') {
+      setStaleRemoveUnitsInput(formatStaleRemoveUnits(staleRemoveMs));
+    }
+  }, [isEditingStaleRemoveMs, staleRemoveMs, staleRemoveUnitsInput]);
 
   useEffect(() => {
     setExcludedSnapshots((current) => {
@@ -360,11 +375,11 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   }, []);
 
   const runtimeAnchor = isScanning ? runtimeNow : scanStoppedAt;
-  const scanRuntime = scanStartedAt && runtimeAnchor
-    ? formatDuration(runtimeAnchor - scanStartedAt)
-    : '00:00:00:000';
-  const displayedStaleRemoveMs = removeStaleTags ? staleRemoveMs : 0;
+  const scanRuntimeParts = scanStartedAt && runtimeAnchor
+    ? getDurationParts(runtimeAnchor - scanStartedAt)
+    : getDurationParts(0);
   const activePresetIndex = Math.max(0, PRESET_OPTIONS.findIndex((preset) => preset.mode === activePreset));
+  const activePresetOption = PRESET_OPTIONS[activePresetIndex] ?? PRESET_OPTIONS[0];
   const presetIndicatorStyle: React.CSSProperties = {
     width: 'calc((100% - 0.5rem) / 3)',
     transform: `translateX(${activePresetIndex * 100}%)`,
@@ -380,16 +395,50 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   const tableVariant: TableVariant = viewportMode === 'desktop' ? 'desktop' : 'tablet';
   const activeTableMinWidth = tableVariant === 'desktop' ? DESKTOP_TABLE_MIN_WIDTH : TABLET_TABLE_MIN_WIDTH;
   const listItemSize = viewportMode === 'phone' ? 150 : 44;
-  const handleStaleRemoveMsChange = (value: number) => {
-    const rawValue = Number.isFinite(value) ? Math.trunc(value) : 0;
-    if (rawValue <= 0) {
-      onChangeRemoveStaleTags(false);
+  const applyStaleRemoveUnits = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 3);
+    setStaleRemoveUnitsInput(digits);
+
+    if (digits === '') return;
+
+    const units = Number(digits);
+    if (!Number.isFinite(units) || units <= 0) return;
+
+    onChangeStaleRemoveMs(clamp(units, 1, 600) * 100);
+  };
+
+  const handleStaleRemoveEnabledChange = (enabled: boolean) => {
+    if (enabled && staleRemoveUnitsInput.trim() === '') {
+      const nextUnits = formatStaleRemoveUnits(staleRemoveMs);
+      setStaleRemoveUnitsInput(nextUnits);
+      onChangeStaleRemoveMs(Number(nextUnits) * 100);
+    }
+
+    onChangeRemoveStaleTags(enabled);
+  };
+
+  const handleStaleRemoveBlur = () => {
+    setIsEditingStaleRemoveMs(false);
+
+    const units = Number(staleRemoveUnitsInput);
+    if (!staleRemoveUnitsInput) {
       return;
     }
 
-    const nextMs = rawValue < 100 ? rawValue * 100 : rawValue;
-    onChangeRemoveStaleTags(true);
-    onChangeStaleRemoveMs(Math.min(60000, nextMs));
+    if (!Number.isFinite(units) || units <= 0) {
+      setStaleRemoveUnitsInput('');
+      return;
+    }
+
+    const normalizedUnits = clamp(units, 1, 600);
+    setStaleRemoveUnitsInput(String(normalizedUnits));
+    onChangeStaleRemoveMs(normalizedUnits * 100);
+  };
+
+  const clearStaleRemoveInput = () => {
+    setIsEditingStaleRemoveMs(true);
+    setStaleRemoveUnitsInput('');
+    window.requestAnimationFrame(() => staleRemoveInputRef.current?.focus());
   };
 
   const SignalCell = ({ compact = false, tag }: { compact?: boolean; tag: Tag }) => {
@@ -658,7 +707,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
             <div className="soft-surface relative ml-0 inline-grid min-w-[218px] flex-1 grid-cols-3 rounded-md border border-[#52c7da]/20 p-1 sm:flex-none lg:ml-2">
               <span
                 aria-hidden="true"
-                className="absolute bottom-1 left-1 top-1 rounded bg-white/82 shadow-sm shadow-[#52c7da]/12 ring-1 ring-[#52c7da]/16 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                className="absolute bottom-1 left-1 top-1 rounded bg-[#E7F9FC]/95 shadow-[0_8px_22px_rgba(82,199,218,0.18)] ring-1 ring-[#52c7da]/45 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
                 style={presetIndicatorStyle}
               />
               {PRESET_OPTIONS.map((preset) => (
@@ -677,7 +726,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
                   {preset.label}
                   <span
                     role="tooltip"
-                    className="pointer-events-none absolute left-1/2 top-[calc(100%+10px)] z-50 block w-64 -translate-x-1/2 -translate-y-1 scale-95 rounded-lg border border-[#52c7da]/24 bg-white/90 p-3 text-left normal-case text-[#52666B] opacity-0 shadow-[0_18px_50px_rgba(18,78,90,0.14)] backdrop-blur-xl transition-all duration-200 group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-focus:translate-y-0 group-focus:scale-100 group-focus:opacity-100"
+                    className="pointer-events-none absolute left-1/2 top-[calc(100%+10px)] z-50 hidden w-64 -translate-x-1/2 -translate-y-1 scale-95 rounded-lg border border-[#52c7da]/24 bg-white/90 p-3 text-left normal-case text-[#52666B] opacity-0 shadow-[0_18px_50px_rgba(18,78,90,0.14)] backdrop-blur-xl transition-all duration-200 group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-focus:translate-y-0 group-focus:scale-100 group-focus:opacity-100 sm:block"
                   >
                     <span className="block text-[10px] font-bold uppercase tracking-wide text-[#166B78]">{preset.title}</span>
                     <span className="mt-1 block text-[11px] font-medium leading-4 text-[#52666B]">{preset.description}</span>
@@ -686,11 +735,24 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
                 </button>
               ))}
             </div>
+
+            <div className="soft-surface w-full rounded-lg border border-[#52c7da]/20 px-3 py-2 text-left sm:hidden">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-[#166B78]">{activePresetOption.title}</p>
+              <p className="mt-1 text-[11px] font-semibold leading-4 text-[#52666B]">{activePresetOption.description}</p>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            <div className="soft-surface flex h-12 min-w-[174px] flex-1 items-center justify-center rounded-lg border border-[#52c7da]/32 px-3 sm:flex-none sm:px-4">
-              <span className="seven-segment text-lg text-[#0C4F5B] sm:text-xl">{scanRuntime}</span>
+            <div className="soft-surface flex h-12 w-[15.25rem] flex-none items-center justify-center rounded-lg border border-[#52c7da]/32 px-2 sm:w-[15.75rem]">
+              <div className="seven-segment scan-time-grid text-lg text-[#0C4F5B] sm:text-xl" aria-label={`${scanRuntimeParts.hours}:${scanRuntimeParts.minutes}:${scanRuntimeParts.seconds}:${scanRuntimeParts.milliseconds}`}>
+                <span className="scan-time-segment">{scanRuntimeParts.hours}</span>
+                <span className="scan-time-separator">:</span>
+                <span className="scan-time-segment">{scanRuntimeParts.minutes}</span>
+                <span className="scan-time-separator">:</span>
+                <span className="scan-time-segment">{scanRuntimeParts.seconds}</span>
+                <span className="scan-time-separator">:</span>
+                <span className="scan-time-segment">{scanRuntimeParts.milliseconds}</span>
+              </div>
             </div>
             <Button variant="outline" onClick={onClear} size="sm" className="h-10 border-[#DDECEF] sm:h-8">
               CLEAR
@@ -712,7 +774,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           <div className="soft-surface relative inline-grid w-full grid-cols-2 rounded-md border border-[#52c7da]/20 p-1 sm:w-auto sm:min-w-[216px]">
             <span
               aria-hidden="true"
-              className="absolute bottom-1 left-1 top-1 rounded bg-white/82 shadow-sm shadow-[#52c7da]/12 ring-1 ring-[#52c7da]/16 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              className="absolute bottom-1 left-1 top-1 rounded bg-[#E7F9FC]/95 shadow-[0_8px_22px_rgba(82,199,218,0.18)] ring-1 ring-[#52c7da]/45 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
               style={scannerPanelIndicatorStyle}
             />
             <button
@@ -732,21 +794,70 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 sm:flex-none">
+            <label className="soft-surface inline-flex h-9 items-center gap-2 rounded-md border border-[#52c7da]/20 px-2 text-[10px] font-bold uppercase tracking-wide text-[#52666B] sm:h-8">
               <input
-                type="number"
-                min={0}
-                max={60000}
-                step={100}
-                value={displayedStaleRemoveMs}
-                onChange={(event) => handleStaleRemoveMsChange(Number(event.target.value))}
-                className="h-9 w-full min-w-[118px] rounded-md border border-[#52c7da]/20 bg-white/52 px-2 pr-9 text-center font-mono text-xs font-semibold text-[#166B78] outline-none backdrop-blur-md focus:border-[#52c7da]/55 sm:h-8 sm:w-28"
-                title="0 disables stale removal. Values below 100 are expanded to milliseconds, so 30 becomes 3000 ms."
-                aria-label="Stale remove timeout in milliseconds"
+                type="checkbox"
+                checked={removeStaleTags}
+                onChange={(event) => handleStaleRemoveEnabledChange(event.target.checked)}
+                className="peer sr-only"
+                aria-label="Enable stale tag removal"
               />
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-wide text-[#7A8E92]">
+              <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                removeStaleTags
+                  ? 'border-[#52c7da] bg-[#52c7da] text-white'
+                  : 'border-[#52c7da]/35 bg-white/42'
+              }`}>
+                {removeStaleTags && <Check size={12} strokeWidth={2.4} />}
+              </span>
+              REMOVE
+            </label>
+
+            <div
+              className={`soft-surface flex h-9 min-w-[126px] flex-1 items-center justify-center rounded-md border border-[#52c7da]/20 px-2 sm:h-8 sm:w-32 sm:flex-none ${
+                removeStaleTags ? 'opacity-100' : 'opacity-40'
+              }`}
+              title="Type 30 for 3000 ms. The final 00 ms is appended automatically."
+            >
+              <input
+                ref={staleRemoveInputRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={3}
+                value={staleRemoveUnitsInput}
+                disabled={!removeStaleTags}
+                onFocus={() => setIsEditingStaleRemoveMs(true)}
+                onBlur={handleStaleRemoveBlur}
+                onChange={(event) => applyStaleRemoveUnits(event.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-right font-mono text-xs font-semibold text-[#166B78] outline-none disabled:cursor-not-allowed"
+                placeholder="30"
+                aria-label="Stale remove timeout in hundreds of milliseconds"
+              />
+              <span className="font-mono text-xs font-semibold text-[#166B78]">
+                {staleRemoveUnitsInput ? '00' : ''}
+              </span>
+              <span className="ml-1 text-[10px] font-bold uppercase tracking-wide text-[#7A8E92]">
                 ms
               </span>
+              {removeStaleTags && staleRemoveUnitsInput && (
+                <button
+                  type="button"
+                  className="ml-1 flex h-5 w-5 items-center justify-center rounded text-[#8E8E93] hover:bg-white/70 hover:text-[#52666B] focus:outline-none focus:ring-2 focus:ring-[#52c7da]/25"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    clearStaleRemoveInput();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  aria-label="Clear stale remove timeout"
+                  title="Clear and type a new timeout"
+                >
+                  <X size={12} strokeWidth={2.2} />
+                </button>
+              )}
             </div>
 
             {scannerPanel === 'excluded' && excludedEpcs.length > 0 && (

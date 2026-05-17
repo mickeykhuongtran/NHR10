@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
@@ -31,12 +32,16 @@ const SESSION_SELECT_OPTIONS = SESSION_OPTIONS.map((item) => ({ label: `S${item}
 const FIELD_CLASS = 'soft-surface h-10 w-full rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#1D1D1F] outline-none focus:border-[#52c7da]/60 sm:h-9';
 const COMPACT_BUTTON_CLASS = 'h-10 text-[10px] font-bold tracking-wide sm:h-8';
 const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const normalizeProfileValue = (value: unknown, fallback = 53) => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
 type SelectOption = { label: string; value: number };
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
-  const [profile, setProfile] = useState(settings.linkProfile);
+  const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
   const [qValue, setQValue] = useState(settings.qValue);
   const [session, setSession] = useState(settings.session);
   const [queryInterval, setQueryInterval] = useState(settings.scanParams?.interval || 0);
@@ -50,7 +55,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
 
   useEffect(() => {
     setPower(settings.power);
-    setProfile(settings.linkProfile);
+    setProfile(normalizeProfileValue(settings.linkProfile));
     setQValue(settings.qValue);
     setSession(settings.session);
     setTagFocus(settings.tagFocus);
@@ -64,7 +69,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
   const handleGetProfile = () => bleService.getProfile();
-  const handleSetProfile = () => bleService.setLinkProfile(profile);
+  const handleSetProfile = async () => {
+    await bleService.setLinkProfile(profile);
+    window.setTimeout(() => {
+      void bleService.getProfile();
+    }, 150);
+  };
   const handleGetQSession = () => bleService.getQSession();
   const handleSetQSession = () => bleService.setQSession(qValue, session);
   const handleGetQueryParams = () => bleService.getQueryParam();
@@ -72,6 +82,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const handleGetTagFocus = () => bleService.getTagFocus();
   const handleSetTagFocus = () => bleService.setTagFocus(tagFocus);
   const adjustPower = (delta: number) => setPower((current) => clampNumber(current + delta, 0, 30));
+  const tagFocusIndicatorStyle: React.CSSProperties = {
+    width: 'calc((100% - 0.5rem) / 2)',
+    transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
+  };
 
   const Card = ({
     children,
@@ -119,7 +133,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   }) => {
     const selectRef = useRef<HTMLDivElement>(null);
     const isOpen = openSelect === id;
-    const selectedOption = options.find((option) => option.value === value);
+    const selectedValue = normalizeProfileValue(value, value);
+    const selectedOption = options.find((option) => option.value === selectedValue);
 
     useEffect(() => {
       if (!isOpen) return;
@@ -149,22 +164,27 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
           }}
         >
           <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
-          <span className="shrink-0 text-[#7A8E92]">{isOpen ? '^' : 'v'}</span>
+          <ChevronDown
+            size={16}
+            strokeWidth={2.2}
+            className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
+            aria-hidden="true"
+          />
         </button>
 
         {isOpen && (
           <div
             role="listbox"
-            className="absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 overflow-y-auto rounded-md border border-[#52c7da]/20 bg-white p-1 shadow-sm"
+            className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
           >
             {options.map((option) => (
               <button
                 key={option.value}
                 type="button"
                 role="option"
-                aria-selected={value === option.value}
+                aria-selected={selectedValue === option.value}
                 className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
-                  value === option.value ? 'bg-[#F3FCFE] text-[#166B78]' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
+                  selectedValue === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
                 }`}
                 onClick={() => {
                   onChange(option.value);
@@ -250,7 +270,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         </Card>
 
         <Card title="Tag Focus" subtitle="Singulation assist">
-          <div className="grid grid-cols-2 rounded-md border border-[#52c7da]/20 bg-white/46 p-1">
+          <div className="soft-surface relative grid grid-cols-2 rounded-md border border-[#52c7da]/24 p-1">
+            <span
+              aria-hidden="true"
+              className="absolute bottom-1 left-1 top-1 rounded bg-[#E7F9FC]/95 shadow-[0_8px_22px_rgba(82,199,218,0.18)] ring-1 ring-[#52c7da]/45 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={tagFocusIndicatorStyle}
+            />
             {[
               { label: 'OFF', value: false },
               { label: 'ON', value: true },
@@ -259,8 +284,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 key={item.label}
                 type="button"
                 onClick={() => setTagFocus(item.value)}
-                className={`h-10 rounded text-xs font-bold transition-colors sm:h-9 ${
-                  tagFocus === item.value ? 'bg-white text-[#166B78] shadow-sm' : 'text-[#6E7F83] hover:text-[#166B78]'
+                className={`relative z-10 h-10 rounded text-xs font-bold transition-colors sm:h-9 ${
+                  tagFocus === item.value ? 'text-[#0C4F5B]' : 'text-[#6E7F83] hover:text-[#166B78]'
                 }`}
               >
                 {item.label}

@@ -177,8 +177,9 @@ const handleDataReceived = useCallback((data: any) => {
         await bleService.sendCommand({ cmd: 'TID', val: value ? 1 : 0 });
         connection.setSettings(s => ({ ...s, fastTid: value }));
       } else if (key === 'linkProfile') {
-        await bleService.setBaseband(value, connection.settings.qValue, connection.settings.session);
-        connection.setSettings(s => ({ ...s, linkProfile: value }));
+        const profile = Number(value);
+        await bleService.setLinkProfile(profile);
+        connection.setSettings(s => ({ ...s, linkProfile: profile }));
       } else if (key === 'qValue') {
         const { q, s } = value;
         await bleService.setBaseband(connection.settings.linkProfile, q, s);

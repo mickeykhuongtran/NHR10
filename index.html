@@ -143,11 +143,40 @@
       .seven-segment {
         font-family: "Orbitron", "DS-Digital", "Seven Segment", "SFMono-Regular", monospace;
         font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1, "lnum" 1;
         letter-spacing: 0;
         font-weight: 700;
         text-shadow:
           0 0 12px rgba(82, 199, 218, 0.18),
           0 1px 0 rgba(255, 255, 255, 0.75);
+      }
+
+      .scan-time-grid {
+        display: grid;
+        grid-template-columns: 2.35rem 0.42rem 2.35rem 0.42rem 2.35rem 0.42rem 3.35rem;
+        align-items: center;
+        justify-content: center;
+        column-gap: 0.1rem;
+        width: 13.7rem;
+      }
+
+      .scan-time-segment {
+        display: flex;
+        height: 2rem;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 0.38rem;
+        background: rgba(255, 255, 255, 0.36);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+      }
+
+      .scan-time-separator {
+        display: flex;
+        height: 2rem;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.68;
       }
 
       @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -162,6 +191,30 @@
       .custom-scrollbar {
         scrollbar-width: thin;
         scrollbar-color: #CBD5E1 transparent;
+      }
+
+      .select-menu-scrollbar {
+        scrollbar-width: auto;
+        scrollbar-color: rgba(82, 199, 218, 0.72) rgba(231, 249, 252, 0.75);
+      }
+
+      .select-menu-scrollbar::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .select-menu-scrollbar::-webkit-scrollbar-track {
+        background: rgba(231, 249, 252, 0.75);
+        border-radius: 999px;
+      }
+
+      .select-menu-scrollbar::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, rgba(82, 199, 218, 0.9), rgba(22, 107, 120, 0.78));
+        border: 2px solid rgba(255, 255, 255, 0.94);
+        border-radius: 999px;
+      }
+
+      .select-menu-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, rgba(82, 199, 218, 1), rgba(12, 79, 91, 0.86));
       }
 
       .scrollbar-none {

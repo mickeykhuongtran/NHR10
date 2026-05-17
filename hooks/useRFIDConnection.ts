@@ -2,6 +2,19 @@ import { useState, useEffect, useCallback } from 'react';
 import { bleService } from '../services/bleService';
 import { ConnectionStatus, Settings, LogEntry } from '../types';
 
+const parseFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const parseLinkProfile = (data: any): number | null => (
+  parseFiniteNumber(data.val ?? data.profile ?? data.linkProfile ?? data.link_profile)
+);
+
 export const useRFIDConnection = () => {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [settings, setSettings] = useState<Settings>({
@@ -9,7 +22,7 @@ export const useRFIDConnection = () => {
     buzzer: true,
     tagFocus: false,
     fastTid: false,
-    linkProfile: 1,
+    linkProfile: 53,
     qValue: 4,
     session: 1,
     scanParams: { interval: 0, dwell: 0, count: 0 },
@@ -42,7 +55,12 @@ export const useRFIDConnection = () => {
         }
     }
     if (data.cmd === 'GP') setSettings(s => ({ ...s, power: data.val }));
-    if (data.cmd === 'GLP') setSettings(s => ({ ...s, linkProfile: data.val }));
+    if (data.cmd === 'GLP' || data.cmd === 'SLP') {
+        const profile = parseLinkProfile(data);
+        if (profile !== null) {
+            setSettings(s => ({ ...s, linkProfile: profile }));
+        }
+    }
     if (data.cmd === 'GQS') {
         let q = data.q;
         let s = data.session;
