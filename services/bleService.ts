@@ -26,10 +26,10 @@ interface BluetoothRemoteGATTCharacteristic extends EventTarget {
 }
 // --------------------------------------
 
-const SERVICE_UUID = 0x00ff;
-const CHAR_CMD_UUID = 0xff01;
-const CHAR_FILE_REQ_UUID = 0xff02;
-const CHAR_FILE_DATA_UUID = 0xff03;
+const SERVICE_UUID = '000000ff-0000-1000-8000-00805f9b34fb';
+const CHAR_CMD_UUID = '0000ff01-0000-1000-8000-00805f9b34fb';
+const CHAR_FILE_REQ_UUID = '0000ff02-0000-1000-8000-00805f9b34fb';
+const CHAR_FILE_DATA_UUID = '0000ff03-0000-1000-8000-00805f9b34fb';
 const JSON_FRAME_START = 0x7B; // '{'
 const LIVE_TAGS_MAGIC_0 = 0x4E; // 'N'
 const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
@@ -47,6 +47,11 @@ type DataCallback = (data: any) => void;
 type LogCallback = (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void;
 type FileTransferEvent = 'request' | 'start' | 'progress' | 'complete' | 'busy' | 'error';
 type FileTransferCallback = (event: FileTransferEvent, data?: any) => void;
+type RequestDeviceOptions = {
+  acceptAllDevices?: boolean;
+  filters?: Array<{ namePrefix?: string; services?: string[] }>;
+  optionalServices: string[];
+};
 
 type NhrbStartMetadata = {
   cmd: 'START';
@@ -103,13 +108,7 @@ class BLEService {
     this.log('Requesting device...', 'info');
 
     try {
-      this.device = await nav.bluetooth.requestDevice({
-        filters: [
-          { namePrefix: 'NHR-10' },
-          { namePrefix: 'Nextwaves' }
-        ],
-        optionalServices: [SERVICE_UUID],
-      });
+      this.device = await this.requestDevice(nav);
 
       this.device!.addEventListener('gattserverdisconnected', this.handleDisconnect.bind(this));
 
@@ -135,6 +134,32 @@ class BLEService {
     } catch (error: any) {
       this.log(`Connection failed: ${error.message}`, 'error');
       throw error;
+    }
+  }
+
+  private async requestDevice(nav: any): Promise<BluetoothDevice> {
+    const filteredOptions: RequestDeviceOptions = {
+      filters: [
+        { namePrefix: 'NHR-10' },
+        { namePrefix: 'Nextwaves' },
+      ],
+      optionalServices: [SERVICE_UUID],
+    };
+
+    try {
+      return await nav.bluetooth.requestDevice(filteredOptions);
+    } catch (error: any) {
+      const message = String(error?.message ?? error ?? '');
+      const shouldRetryForBluefy = /payload|parse|parsed|requestdevice/i.test(message);
+      if (!shouldRetryForBluefy) {
+        throw error;
+      }
+
+      this.log('Retrying BLE request with iOS-compatible selector...', 'info');
+      return nav.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [SERVICE_UUID],
+      });
     }
   }
 
