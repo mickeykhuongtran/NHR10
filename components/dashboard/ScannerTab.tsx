@@ -871,7 +871,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
 
   return (
     <div className="flex h-full w-full max-w-full touch-pan-y flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-contain overscroll-x-none bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5 lg:overflow-hidden">
-      <div className="sticky top-0 z-40 -mx-2 -mt-2 px-2 pt-2 sm:hidden">
+      <div className="sticky top-0 z-40 -mx-2 -mt-2 px-2 sm:hidden">
         <div className="soft-glass flex gap-2 rounded-lg border border-[#52c7da]/28 bg-white/82 p-2 shadow-[0_12px_34px_rgba(18,78,90,0.16)] backdrop-blur-2xl">
           {renderScanActionButtons(true)}
         </div>

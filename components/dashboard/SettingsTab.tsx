@@ -112,6 +112,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     width: 'calc((100% - 0.5rem) / 2)',
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
   };
+  const activeCardStyle: React.CSSProperties = {
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.90), rgba(238,251,253,0.76))',
+    boxShadow: '0 26px 72px rgba(18,78,90,0.15), 0 1px 0 rgba(255,255,255,0.95) inset',
+    backdropFilter: 'blur(30px) saturate(185%)',
+    WebkitBackdropFilter: 'blur(30px) saturate(185%)',
+    transform: 'translateY(-1px)',
+  };
 
   const markActionPressed = (actionKey: string) => {
     setActiveActionKey(actionKey);
@@ -165,26 +172,35 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   });
 
   const Card = ({
+    actionId,
     children,
     className = '',
     subtitle,
     title,
   }: {
+    actionId?: string;
     children: React.ReactNode;
     className?: string;
     subtitle?: string;
     title: string;
-  }) => (
-    <section className={`soft-glass rounded-lg p-3 ${className}`}>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
-          {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
+  }) => {
+    const isActive = actionId ? activeActionKey?.startsWith(`${actionId}:`) : false;
+
+    return (
+      <section
+        className={`soft-glass rounded-lg p-3 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.02]' : ''} ${className}`}
+        style={isActive ? activeCardStyle : undefined}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
+            {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
+          </div>
         </div>
-      </div>
-      {children}
-    </section>
-  );
+        {children}
+      </section>
+    );
+  };
 
   const ActionRow = ({ id, onGet, onSet }: { id: string; onGet: SettingsAction; onSet: SettingsAction }) => (
     <div className="mt-3 grid grid-cols-2 gap-2">
@@ -193,7 +209,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         variant="secondary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:get` ? 'bg-white/90 text-[#166B78] ring-2 ring-[#52c7da]/38' : ''
+          activeActionKey === `${id}:get` ? 'bg-white/78 text-[#166B78] shadow-[inset_0_2px_10px_rgba(18,78,90,0.08),0_8px_22px_rgba(255,255,255,0.45)] brightness-[1.03]' : ''
         }`}
       >
         GET
@@ -203,7 +219,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         variant="primary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:set` ? 'ring-2 ring-[#166B78]/24 brightness-105' : ''
+          activeActionKey === `${id}:set` ? 'shadow-[inset_0_2px_12px_rgba(18,78,90,0.12),0_12px_26px_rgba(82,199,218,0.28)] brightness-[1.06]' : ''
         }`}
       >
         SET
@@ -298,7 +314,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   return (
     <div className="h-full overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
       <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card title="Power" subtitle="RF output">
+        <Card actionId="power" title="Power" subtitle="RF output">
           <div className="flex items-center justify-center gap-3">
             <button
               type="button"
@@ -323,6 +339,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         </Card>
 
         <Card
+          actionId="profile"
           title="RF Link Profile"
           subtitle="Backscatter link"
           className={`relative overflow-visible ${openSelect === 'profile' ? 'z-[120]' : 'z-10'}`}
@@ -337,6 +354,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         </Card>
 
         <Card
+          actionId="q-session"
           title="EPC Gen2"
           subtitle="Q and session"
           className={`relative overflow-visible ${openSelect === 'q' || openSelect === 'session' ? 'z-[120]' : 'z-10'}`}
@@ -364,7 +382,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
           <ActionRow id="q-session" onGet={handleGetQSession} onSet={handleSetQSession} />
         </Card>
 
-        <Card title="Tag Focus" subtitle="Singulation assist">
+        <Card actionId="tag-focus" title="Tag Focus" subtitle="Singulation assist">
           <div className="soft-surface relative grid grid-cols-2 rounded-md border border-[#52c7da]/24 p-1">
             <span
               aria-hidden="true"
@@ -391,6 +409,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         </Card>
 
         <Card
+          actionId="query-params"
           title="Query Parameter"
           subtitle="Inventory timing"
           className={`relative overflow-visible xl:col-span-2 ${openSelect === 'interval' || openSelect === 'dwell' || openSelect === 'append' ? 'z-[120]' : 'z-10'}`}
