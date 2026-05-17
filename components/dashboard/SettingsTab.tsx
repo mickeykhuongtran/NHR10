@@ -113,11 +113,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
   };
   const activeCardStyle: React.CSSProperties = {
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.90), rgba(238,251,253,0.76))',
-    boxShadow: '0 26px 72px rgba(18,78,90,0.15), 0 1px 0 rgba(255,255,255,0.95) inset',
-    backdropFilter: 'blur(30px) saturate(185%)',
-    WebkitBackdropFilter: 'blur(30px) saturate(185%)',
-    transform: 'translateY(-1px)',
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(218,247,252,0.88))',
+    boxShadow: '0 30px 78px rgba(18,78,90,0.22), 0 0 0 1px rgba(82,199,218,0.18) inset, 0 1px 0 rgba(255,255,255,0.98) inset',
+    backdropFilter: 'blur(36px) saturate(210%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(210%)',
+    transform: 'translateY(-2px)',
   };
 
   const markActionPressed = (actionKey: string) => {
@@ -128,7 +128,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     activeActionTimerRef.current = window.setTimeout(() => {
       setActiveActionKey(null);
       activeActionTimerRef.current = null;
-    }, 280);
+    }, 380);
   };
 
   const runSettingsAction = (actionKey: string, action: SettingsAction, source: SettingsActionSource) => {
@@ -188,7 +188,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
 
     return (
       <section
-        className={`soft-glass rounded-lg p-3 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.02]' : ''} ${className}`}
+        className={`soft-glass rounded-lg p-3 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
         style={isActive ? activeCardStyle : undefined}
       >
         <div className="mb-3 flex items-start justify-between gap-3">
@@ -209,7 +209,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         variant="secondary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:get` ? 'bg-white/78 text-[#166B78] shadow-[inset_0_2px_10px_rgba(18,78,90,0.08),0_8px_22px_rgba(255,255,255,0.45)] brightness-[1.03]' : ''
+          activeActionKey === `${id}:get` ? 'bg-white/95 text-[#0C4F5B] shadow-[inset_0_2px_14px_rgba(18,78,90,0.14),0_10px_24px_rgba(18,78,90,0.08)] brightness-[1.07]' : ''
         }`}
       >
         GET
@@ -219,7 +219,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
         variant="primary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:set` ? 'shadow-[inset_0_2px_12px_rgba(18,78,90,0.12),0_12px_26px_rgba(82,199,218,0.28)] brightness-[1.06]' : ''
+          activeActionKey === `${id}:set` ? 'shadow-[inset_0_2px_16px_rgba(18,78,90,0.18),0_14px_30px_rgba(82,199,218,0.36)] brightness-[1.1] saturate-[1.18]' : ''
         }`}
       >
         SET
