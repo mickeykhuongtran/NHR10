@@ -3,7 +3,7 @@ import { bleService } from '../services/bleService';
 import { ScanStats, Tag, ScanType, TagVisibility } from '../types';
 
 const TAG_ACTIVE_MS = 1200;
-const TAG_HIDE_MS = 3000;
+const DEFAULT_TAG_REMOVE_MS = 3000;
 const TAG_RENDER_INTERVAL_MS = 500;
 
 const DEFAULT_SCAN_STATS: ScanStats = {
@@ -24,16 +24,24 @@ const getTagVisibility = (lastSeen: number, now: number): TagVisibility => (
   now - lastSeen <= TAG_ACTIVE_MS ? 'active' : 'stale'
 );
 
-const getTagFreshness = (lastSeen: number, now: number): number => {
+const normalizeRemoveMs = (value: number): number => (
+  Math.max(100, Math.min(60000, Math.trunc(value)))
+);
+
+const getTagFreshness = (lastSeen: number, now: number, fadeWindowMs: number): number => {
   const ageMs = now - lastSeen;
-  return Math.max(0, Math.min(1, 1 - (ageMs / TAG_HIDE_MS)));
+  return Math.max(0, Math.min(1, 1 - (ageMs / fadeWindowMs)));
 };
 
 export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void) => {
   const [isScanning, setIsScanning] = useState(false);
   const [activeScanType, setActiveScanType] = useState<ScanType>(null);
+  const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
+  const [scanStoppedAt, setScanStoppedAt] = useState<number | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [stats, setStats] = useState<ScanStats>(DEFAULT_SCAN_STATS);
+  const [removeStaleTags, setRemoveStaleTags] = useState(true);
+  const [staleRemoveMs, setStaleRemoveMsState] = useState(DEFAULT_TAG_REMOVE_MS);
   const tagsMap = useRef<Map<string, Tag>>(new Map());
   const rafRef = useRef<number | null>(null);
   const publishTimerRef = useRef<number | null>(null);
@@ -44,20 +52,38 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   const windowUniqueRef = useRef(0);
   const statsLastAtRef = useRef(Date.now());
 
+  const resetScanData = useCallback(() => {
+    const now = Date.now();
+    tagsMap.current.clear();
+    totalReadsRef.current = 0;
+    windowReadsRef.current = 0;
+    windowUniqueRef.current = 0;
+    pendingTagChangesRef.current = false;
+    lastPublishAtRef.current = 0;
+    statsLastAtRef.current = now;
+    setTags([]);
+    setStats(DEFAULT_SCAN_STATS);
+  }, []);
+
+  const setStaleRemoveMs = useCallback((value: number) => {
+    setStaleRemoveMsState(normalizeRemoveMs(value));
+  }, []);
+
   const publishVisibleTags = useCallback((force = false) => {
     const now = Date.now();
     let hasAgingChanges = false;
+    const fadeWindowMs = normalizeRemoveMs(staleRemoveMs);
 
     for (const [epc, tag] of tagsMap.current) {
       const lastSeen = tag.lastSeen ?? tag.timestamp;
-      if (now - lastSeen > TAG_HIDE_MS) {
+      if (removeStaleTags && now - lastSeen > fadeWindowMs) {
         tagsMap.current.delete(epc);
         hasAgingChanges = true;
         continue;
       }
 
       const nextVisibility = getTagVisibility(lastSeen, now);
-      const nextFreshness = getTagFreshness(lastSeen, now);
+      const nextFreshness = getTagFreshness(lastSeen, now, fadeWindowMs);
       if (tag.visibility !== nextVisibility) {
         tag.visibility = nextVisibility;
         hasAgingChanges = true;
@@ -97,7 +123,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       pendingTagChangesRef.current = false;
       lastPublishAtRef.current = now;
     }
-  }, []);
+  }, [removeStaleTags, staleRemoveMs]);
 
   const requestPublish = useCallback((force = false) => {
     if (force) {
@@ -172,6 +198,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       const tag = existingTag ?? {
         epc,
         timestamp: now,
+        firstSeen: now,
         count: 0,
       };
       const safeCountDelta = Math.max(0, Math.trunc(countDelta));
@@ -182,6 +209,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       tag.rssi = rssi;
       tag.lastSeen = now;
       tag.timestamp = now;
+      tag.firstSeen = tag.firstSeen ?? now;
       tag.freshness = 1;
       tag.visibility = 'active';
 
@@ -201,9 +229,15 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
 
   const startScan = async () => {
     try {
+      resetScanData();
+      setScanStartedAt(null);
+      setScanStoppedAt(null);
       await bleService.startScan();
+      const startedAt = Date.now();
       setIsScanning(true);
       setActiveScanType('interactive');
+      setScanStartedAt(startedAt);
+      setScanStoppedAt(null);
       addLog('Scanning Started', 'info');
     } catch (e: any) { addLog(e.message, 'error'); }
   };
@@ -217,35 +251,43 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
         await bleService.stopScan();
         addLog('Scanning Stopped', 'info');
       }
+      const stoppedAt = Date.now();
       setIsScanning(false);
       setActiveScanType(null);
+      setScanStoppedAt(stoppedAt);
     } catch (e: any) { addLog(e.message, 'error'); }
   };
 
   const startBatch = async () => {
     try {
+      resetScanData();
+      setScanStartedAt(null);
+      setScanStoppedAt(null);
       await bleService.startBatch();
+      const startedAt = Date.now();
       setIsScanning(true);
       setActiveScanType('batch');
+      setScanStartedAt(startedAt);
+      setScanStoppedAt(null);
       addLog('Batch Mode Started', 'info');
     } catch (e: any) { addLog(e.message, 'error'); }
   };
 
   const clearTags = () => {
-    tagsMap.current.clear();
-    totalReadsRef.current = 0;
-    windowReadsRef.current = 0;
-    windowUniqueRef.current = 0;
-    statsLastAtRef.current = Date.now();
-    setTags([]);
-    setStats(DEFAULT_SCAN_STATS);
+    resetScanData();
   };
 
   return {
     isScanning,
     activeScanType,
+    scanStartedAt,
+    scanStoppedAt,
+    removeStaleTags,
+    staleRemoveMs,
     tags,
     stats,
+    setRemoveStaleTags,
+    setStaleRemoveMs,
     startScan,
     stopScan,
     startBatch,

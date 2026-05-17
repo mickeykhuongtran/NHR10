@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Search, PenTool, Settings as SettingsIcon, Terminal, Database } from 'lucide-react';
+import { Radio, Crosshair, ScanBarcode, SlidersHorizontal, SquareTerminal, Database } from 'lucide-react';
 import { TopBar } from './TopBar';
 import { ScannerTab } from './ScannerTab';
 import { LocateTab } from './LocateTab';
@@ -16,6 +16,12 @@ interface DashboardLayoutProps {
   scanStats: ScanStats;
   logs: LogEntry[];
   isScanning: boolean;
+  scanStartedAt: number | null;
+  scanStoppedAt: number | null;
+  removeStaleTags: boolean;
+  staleRemoveMs: number;
+  onChangeRemoveStaleTags: (enabled: boolean) => void;
+  onChangeStaleRemoveMs: (value: number) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   activeScanType: 'interactive' | 'batch' | null;
@@ -57,16 +63,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   const [locateEpc, setLocateEpc] = useState<string>('');
 
   const tabs = [
-    { id: 1, label: 'Scanner', icon: LayoutDashboard },
-    { id: 2, label: 'Locate', icon: Search },
-    { id: 3, label: 'Operations', icon: PenTool },
-    { id: 6, label: 'History', icon: Database },
-    { id: 4, label: 'Settings', icon: SettingsIcon },
-    { id: 5, label: 'Debug', icon: Terminal },
+    { id: 1, label: 'Scanner', icon: Radio },
+    { id: 2, label: 'Locate', icon: Crosshair },
+    { id: 3, label: 'Encode', icon: ScanBarcode },
+    { id: 6, label: 'Storage', icon: Database },
+    { id: 4, label: 'Settings', icon: SlidersHorizontal },
+    { id: 5, label: 'Debug', icon: SquareTerminal },
   ];
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#F5F5F7] overflow-hidden text-[#1D1D1F]">
+    <div className="app-space flex flex-col h-[100dvh] overflow-hidden text-[#1D1D1F]">
       {/* Top Bar */}
       <TopBar 
         status={props.status} 
@@ -77,11 +83,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden relative min-h-0">
         {/* Sidebar / Bottom Navigation */}
-        <nav 
-          className="order-2 lg:order-1 w-full lg:w-56 bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-r border-[#D2D2D7] flex lg:flex-col shrink-0 z-20"
+        <nav
+          className="soft-glass-strong order-2 flex w-full shrink-0 border-t border-[#52c7da]/30 lg:order-1 lg:w-56 lg:flex-col lg:border-r lg:border-t-0 z-20"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
-          <div className="flex flex-row lg:flex-col w-full overflow-x-auto lg:overflow-y-auto scrollbar-none items-center justify-around xl:py-4 lg:space-y-1 lg:px-3">
+          <div className="scrollbar-none flex w-full flex-row items-center justify-around overflow-x-auto lg:flex-col lg:justify-start lg:overflow-y-auto lg:px-3 lg:py-4 lg:space-y-1">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -89,32 +95,38 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 lg:flex-none flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-1 lg:gap-3 px-2 py-2 lg:px-3 lg:py-2.5 transition-all duration-200 min-w-[64px] lg:w-full lg:rounded-lg ${
+                  className={`flex min-w-[58px] flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:min-w-[64px] sm:px-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:rounded-xl lg:px-3 lg:py-3 ${
                     isActive 
-                      ? 'bg-[#007AFF]/10 text-[#007AFF]' 
-                      : 'text-[#6E6E73] hover:bg-[#F5F5F7] hover:text-[#1D1D1F]'
+                      ? 'bg-white/70 text-[#166B78] shadow-sm shadow-[#52c7da]/10'
+                      : 'text-[#6E6E73] hover:bg-white/45 hover:text-[#166B78]'
                   }`}
                 >
-                  <Icon size={isActive ? 20 : 18} className={isActive ? 'text-[#007AFF]' : 'text-[#86868B]'} />
-                  <span className={`text-[9px] lg:text-xs font-semibold whitespace-nowrap ${isActive ? 'text-[#007AFF]' : ''}`}>
-                    {tab.label}
+                  <Icon size={isActive ? 21 : 19} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
+                  <span className={`text-[9px] font-bold uppercase tracking-wide sm:text-[10px] lg:text-[13px] whitespace-nowrap ${isActive ? 'text-[#166B78]' : ''}`}>
+                    {tab.label.toUpperCase()}
                   </span>
                 </button>
               );
             })}
           </div>
           
-          <div className="p-4 border-t border-[#D2D2D7] hidden lg:block mt-auto">
+          <div className="p-4 border-t border-[#52c7da]/20 hidden lg:block mt-auto">
             <p className="text-[10px] text-[#86868B] font-mono text-center">v{props.settings.version || '1.0.0'}</p>
           </div>
         </nav>
 
         {/* Main Content Area */}
-        <main className="order-1 lg:order-2 flex-1 overflow-hidden relative min-h-0 bg-[#F5F5F7]">
+        <main className="order-1 lg:order-2 flex-1 overflow-hidden relative min-h-0 bg-transparent">
           {activeTab === 1 && (
             <ScannerTab 
               isScanning={props.isScanning}
               activeScanType={props.activeScanType}
+              scanStartedAt={props.scanStartedAt}
+              scanStoppedAt={props.scanStoppedAt}
+              removeStaleTags={props.removeStaleTags}
+              staleRemoveMs={props.staleRemoveMs}
+              onChangeRemoveStaleTags={props.onChangeRemoveStaleTags}
+              onChangeStaleRemoveMs={props.onChangeStaleRemoveMs}
               onStartScan={props.onStartScan}
               onStopScan={props.onStopScan}
               onStartBatch={props.onStartBatch}
@@ -123,10 +135,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               tags={props.tags}
               stats={props.scanStats}
               onApplyPreset={props.onApplyPreset}
-              onLocate={(epc) => {
-                setLocateEpc(epc);
-                setActiveTab(2); // Switch to Locate tab
-              }}
               isBatchSaving={props.isBatchSaving}
               batchSaveInfo={props.batchSaveInfo}
             />

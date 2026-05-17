@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { Play, Square, Database, Trash2, Activity, FilterX, Search } from 'lucide-react';
+import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
+import { Play, Square, Database, FilterX, RotateCcw, Copy, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BatchSaveInfo, ScanStats, Tag } from '../../types';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -7,6 +7,42 @@ import { FixedSizeList as List } from 'react-window';
 
 const RSSI_MIN = 60;
 const RSSI_MAX = 110;
+const DESKTOP_TABLE_MIN_WIDTH = 1000;
+const TABLET_TABLE_MIN_WIDTH = 740;
+const DESKTOP_TAG_TABLE_COLUMNS = '52px minmax(20rem, 1fr) 156px 92px 116px 116px 132px';
+const TABLET_TAG_TABLE_COLUMNS = '44px minmax(13rem, 1fr) 120px 78px 108px 118px';
+const TIMER_UPDATE_INTERVAL_MS = 100;
+const PRESET_OPTIONS = [
+  {
+    mode: 'standard',
+    label: 'STANDARD',
+    title: 'Inventory scanning',
+    description: 'Recommended for inventory scans, dense tag populations, and high-density tag environments.',
+  },
+  {
+    mode: 'quick',
+    label: 'QUICK',
+    title: 'Fast tracking',
+    description: 'Recommended for quick scans with fewer tags and continuous tag-state monitoring.',
+  },
+  {
+    mode: 'deep',
+    label: 'DEEP',
+    title: 'Maximum range',
+    description: 'Recommended for tag search when the longest possible read distance matters.',
+  },
+] as const;
+
+type ScanPresetMode = (typeof PRESET_OPTIONS)[number]['mode'];
+type ViewportMode = 'phone' | 'tablet' | 'desktop';
+type TableVariant = Extract<ViewportMode, 'tablet' | 'desktop'>;
+
+const getViewportMode = (): ViewportMode => {
+  if (typeof window === 'undefined') return 'desktop';
+  if (window.innerWidth < 640) return 'phone';
+  if (window.innerWidth < 1024) return 'tablet';
+  return 'desktop';
+};
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -25,29 +61,95 @@ const formatRate = (value: number) => (
   Number.isFinite(value) ? value.toFixed(value >= 10 ? 0 : 1) : '0'
 );
 
-const formatRssi = (value: number | null) => (
-  value === null || !Number.isFinite(value) ? '--' : value.toFixed(value < 0 ? 0 : 1)
+const formatRssi = (value: number | null | undefined) => (
+  value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toFixed(value < 0 ? 0 : 1)
 );
 
-const formatLastSeen = (lastSeen?: number) => {
-  if (!lastSeen) return '--';
+const formatCount = (value: number | null | undefined) => (
+  value === null || value === undefined || !Number.isFinite(value) ? '0' : Math.max(0, Math.trunc(value)).toLocaleString('en-US')
+);
 
-  const ageMs = Math.max(0, Date.now() - lastSeen);
-  if (ageMs < 1000) return `${Math.round(ageMs)}ms`;
-  return `${(ageMs / 1000).toFixed(1)}s`;
+const formatClock = (timestamp?: number) => {
+  if (!timestamp) return '--';
+
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 };
 
-const parseExcludeTokens = (value: string) => (
-  value
-    .toUpperCase()
-    .split(/[\s,;]+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-);
+const formatDuration = (durationMs: number) => {
+  const safeDuration = Math.max(0, Math.floor(durationMs));
+  const totalSeconds = Math.floor(safeDuration / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const milliseconds = safeDuration % 1000;
+
+  return [
+    ...[hours, minutes, seconds].map((value) => String(value).padStart(2, '0')),
+    String(milliseconds).padStart(3, '0'),
+  ].join(':');
+};
+
+const EpcCell = React.memo(({
+  className = 'pr-4',
+  epc,
+  isCopied,
+  onCopy,
+}: {
+  className?: string;
+  epc: string;
+  isCopied: boolean;
+  onCopy: (epc: string) => void;
+}) => (
+  <div className={`group/epc flex min-w-0 items-center ${className}`} title={epc}>
+    <span className="min-w-0 select-text truncate font-bold tracking-wide text-[#0C4F5B]">
+      {epc}
+    </span>
+    <button
+      type="button"
+      className={`ml-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-[#52c7da]/35 ${
+        isCopied
+          ? 'text-[#166B78] opacity-100'
+          : 'text-[#8E8E93] opacity-35 hover:bg-[#F5F5F7] hover:text-[#52666B] hover:opacity-90 group-hover/epc:opacity-55'
+      }`}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onCopy(epc);
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCopy(epc);
+      }}
+      title={isCopied ? 'Copied EPC' : 'Copy EPC'}
+      aria-label={isCopied ? 'Copied EPC' : `Copy EPC ${epc}`}
+    >
+      {isCopied ? <Check size={14} strokeWidth={1.9} /> : <Copy size={14} strokeWidth={1.7} />}
+    </button>
+  </div>
+));
+
+EpcCell.displayName = 'EpcCell';
 
 interface ScannerTabProps {
   isScanning: boolean;
   activeScanType: 'interactive' | 'batch' | null;
+  scanStartedAt: number | null;
+  scanStoppedAt: number | null;
+  removeStaleTags: boolean;
+  staleRemoveMs: number;
+  onChangeRemoveStaleTags: (enabled: boolean) => void;
+  onChangeStaleRemoveMs: (value: number) => void;
   onStartScan: () => void;
   onStopScan: () => void;
   onStartBatch: () => void;
@@ -55,8 +157,7 @@ interface ScannerTabProps {
   onClear: () => void;
   tags: Tag[];
   stats: ScanStats;
-  onApplyPreset: (mode: 'standard' | 'quick' | 'deep') => void;
-  onLocate: (epc: string) => void;
+  onApplyPreset: (mode: ScanPresetMode) => void;
   isBatchSaving: boolean;
   batchSaveInfo: BatchSaveInfo;
 }
@@ -64,6 +165,12 @@ interface ScannerTabProps {
 export const ScannerTab: React.FC<ScannerTabProps> = ({
   isScanning,
   activeScanType,
+  scanStartedAt,
+  scanStoppedAt,
+  removeStaleTags,
+  staleRemoveMs,
+  onChangeRemoveStaleTags,
+  onChangeStaleRemoveMs,
   onStartScan,
   onStopScan,
   onStartBatch,
@@ -72,19 +179,35 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   tags,
   stats,
   onApplyPreset,
-  onLocate,
   isBatchSaving,
   batchSaveInfo
 }) => {
   const listRef = useRef<List>(null);
-  const [activePreset, setActivePreset] = useState<'standard' | 'quick' | 'deep' | null>(null);
-  const [excludeFilter, setExcludeFilter] = useState('');
+  const copyFeedbackTimerRef = useRef<number | null>(null);
+  const [activePreset, setActivePreset] = useState<ScanPresetMode>('standard');
+  const [scannerPanel, setScannerPanel] = useState<'live' | 'excluded'>('live');
+  const [excludedEpcs, setExcludedEpcs] = useState<string[]>([]);
+  const [excludedSnapshots, setExcludedSnapshots] = useState<Record<string, Tag>>({});
+  const [copiedEpc, setCopiedEpc] = useState<string | null>(null);
+  const [runtimeNow, setRuntimeNow] = useState(Date.now());
+  const [rateHistory, setRateHistory] = useState<number[]>([]);
+  const [viewportMode, setViewportMode] = useState<ViewportMode>(() => getViewportMode());
 
-  const excludeTokens = useMemo(() => parseExcludeTokens(excludeFilter), [excludeFilter]);
-  const displayedTags = useMemo(() => {
-    if (excludeTokens.length === 0) return tags;
-    return tags.filter((tag) => !excludeTokens.some((token) => tag.epc.toUpperCase().includes(token)));
-  }, [excludeTokens, tags]);
+  const excludedSet = useMemo(() => new Set(excludedEpcs), [excludedEpcs]);
+  const tagsByEpc = useMemo(() => new Map(tags.map((tag) => [tag.epc, tag])), [tags]);
+  const displayedTags = useMemo(() => (
+    tags.filter((tag) => !excludedSet.has(tag.epc))
+  ), [excludedSet, tags]);
+  const excludedTags = useMemo(() => (
+    excludedEpcs.map((epc) => tagsByEpc.get(epc) ?? excludedSnapshots[epc] ?? {
+      epc,
+      timestamp: 0,
+      firstSeen: undefined,
+      count: 0,
+      freshness: 0.48,
+      visibility: 'stale' as const,
+    })
+  ), [excludedEpcs, excludedSnapshots, tagsByEpc]);
 
   const displayedRssiAverage = useMemo(() => {
     const values = displayedTags
@@ -95,243 +218,612 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
     return values.reduce((sum, rssi) => sum + rssi, 0) / values.length;
   }, [displayedTags]);
 
-  const handlePresetClick = (mode: 'standard' | 'quick' | 'deep') => {
+  useEffect(() => {
+    const handleResize = () => {
+      const nextMode = getViewportMode();
+      setViewportMode((currentMode) => currentMode === nextMode ? currentMode : nextMode);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', handleResize);
+
+    const breakpointQueries = [
+      window.matchMedia('(max-width: 639px)'),
+      window.matchMedia('(min-width: 1024px)'),
+    ];
+
+    breakpointQueries.forEach((query) => query.addEventListener('change', handleResize));
+
+    const viewportPollId = window.setInterval(handleResize, 500);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      breakpointQueries.forEach((query) => query.removeEventListener('change', handleResize));
+      window.clearInterval(viewportPollId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextRate = Number.isFinite(stats.readsPerSecond) ? stats.readsPerSecond : 0;
+    setRateHistory((current) => [...current.slice(-17), nextRate]);
+  }, [stats.readsPerSecond]);
+
+  useEffect(() => {
+    setRateHistory([]);
+  }, [scanStartedAt]);
+
+  useEffect(() => {
+    setExcludedSnapshots({});
+  }, [scanStartedAt]);
+
+  useEffect(() => {
+    setExcludedSnapshots((current) => {
+      let changed = false;
+      const next: Record<string, Tag> = {};
+
+      excludedEpcs.forEach((epc) => {
+        const liveTag = tagsByEpc.get(epc);
+        const previousTag = current[epc];
+        if (liveTag) {
+          next[epc] = { ...liveTag };
+          changed = changed || previousTag !== liveTag;
+          return;
+        }
+
+        if (previousTag) {
+          next[epc] = previousTag;
+        }
+      });
+
+      if (Object.keys(current).length !== Object.keys(next).length) {
+        changed = true;
+      }
+
+      return changed ? next : current;
+    });
+  }, [excludedEpcs, tagsByEpc]);
+
+  const addExcludedEpc = useCallback((epc: string) => {
+    setExcludedEpcs((current) => current.includes(epc) ? current : [...current, epc]);
+  }, []);
+
+  const removeExcludedEpc = useCallback((epc: string) => {
+    setExcludedEpcs((current) => current.filter((item) => item !== epc));
+  }, []);
+
+  const excludeEpcFromDisplay = useCallback((epc: string) => {
+    addExcludedEpc(epc);
+  }, [addExcludedEpc]);
+
+  const includeEpcInLive = useCallback((epc: string) => {
+    removeExcludedEpc(epc);
+  }, [removeExcludedEpc]);
+
+  const copyEpcToClipboard = useCallback(async (epc: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(epc);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = epc;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      setCopiedEpc(epc);
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
+      copyFeedbackTimerRef.current = window.setTimeout(() => {
+        setCopiedEpc(null);
+        copyFeedbackTimerRef.current = null;
+      }, 900);
+    } catch (error) {
+      console.error('Failed to copy EPC', error);
+    }
+  }, []);
+
+  const handlePresetClick = (mode: ScanPresetMode) => {
     if (isBatchSaving) return;
     setActivePreset(mode);
     onApplyPreset(mode);
   };
 
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollToItem(displayedTags.length);
+    if (listRef.current && scannerPanel === 'live') {
+      listRef.current.scrollToItem(Math.max(0, displayedTags.length - 1));
     }
-  }, [displayedTags.length]);
+  }, [displayedTags.length, scannerPanel]);
 
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
-    const tag = displayedTags[index];
-    const isStale = tag.visibility === 'stale';
-    const freshness = tag.freshness ?? (isStale ? 0.5 : 1);
-    const rowOpacity = 0.28 + (freshness * 0.72);
-    const signalLevel = getRssiLevel(tag.lastRssi ?? tag.rssi);
-    const epcAlpha = 0.58 + (signalLevel * 0.42);
-    const rssiAlpha = 0.55 + (signalLevel * 0.45);
-    const signalWash = signalLevel * freshness * 0.12;
-    const rowBackground = `linear-gradient(90deg, rgba(0,122,255,${signalWash}) 0%, ${isStale ? '#F5F5F7' : '#FFFFFF'} 26%)`;
+  useEffect(() => {
+    if (!isScanning) {
+      setRuntimeNow(Date.now());
+      return;
+    }
+
+    setRuntimeNow(Date.now());
+    const intervalId = window.setInterval(() => setRuntimeNow(Date.now()), TIMER_UPDATE_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isScanning, scanStartedAt]);
+
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+  }, []);
+
+  const runtimeAnchor = isScanning ? runtimeNow : scanStoppedAt;
+  const scanRuntime = scanStartedAt && runtimeAnchor
+    ? formatDuration(runtimeAnchor - scanStartedAt)
+    : '00:00:00:000';
+  const displayedStaleRemoveMs = removeStaleTags ? staleRemoveMs : 0;
+  const activePresetIndex = Math.max(0, PRESET_OPTIONS.findIndex((preset) => preset.mode === activePreset));
+  const presetIndicatorStyle: React.CSSProperties = {
+    width: 'calc((100% - 0.5rem) / 3)',
+    transform: `translateX(${activePresetIndex * 100}%)`,
+  };
+  const scannerPanelIndicatorStyle: React.CSSProperties = {
+    width: 'calc((100% - 0.5rem) / 2)',
+    transform: scannerPanel === 'live' ? 'translateX(0)' : 'translateX(100%)',
+  };
+  const scannerPanelTrackStyle: React.CSSProperties = {
+    width: '200%',
+    transform: scannerPanel === 'live' ? 'translateX(0)' : 'translateX(-50%)',
+  };
+  const tableVariant: TableVariant = viewportMode === 'desktop' ? 'desktop' : 'tablet';
+  const activeTableMinWidth = tableVariant === 'desktop' ? DESKTOP_TABLE_MIN_WIDTH : TABLET_TABLE_MIN_WIDTH;
+  const listItemSize = viewportMode === 'phone' ? 150 : 44;
+  const handleStaleRemoveMsChange = (value: number) => {
+    const rawValue = Number.isFinite(value) ? Math.trunc(value) : 0;
+    if (rawValue <= 0) {
+      onChangeRemoveStaleTags(false);
+      return;
+    }
+
+    const nextMs = rawValue < 100 ? rawValue * 100 : rawValue;
+    onChangeRemoveStaleTags(true);
+    onChangeStaleRemoveMs(Math.min(60000, nextMs));
+  };
+
+  const SignalCell = ({ compact = false, tag }: { compact?: boolean; tag: Tag }) => {
+    const rssi = tag.lastRssi ?? tag.rssi;
+    const signalLevel = getRssiLevel(rssi);
+
+    return (
+      <div className={`flex items-center gap-2 ${compact ? 'justify-start' : 'justify-end'}`}>
+        <div className={`${compact ? 'w-14' : 'w-20'} h-2 overflow-hidden rounded-full bg-[#EAFBFD] ring-1 ring-[#52c7da]/30`}>
+          <div
+            className="h-full rounded-full bg-[#52c7da]"
+            style={{ width: `${Math.max(6, signalLevel * 100)}%` }}
+          />
+        </div>
+        <span className={`${compact ? 'w-10 text-left' : 'w-11 text-right'} font-semibold text-[#166B78]`}>{formatRssi(rssi)}</span>
+      </div>
+    );
+  };
+
+  const TagActionButton = ({ action, compact = false, epc }: { action: 'exclude' | 'include'; compact?: boolean; epc: string }) => {
+    const isExcludeAction = action === 'exclude';
+    const handleAction = () => {
+      if (isExcludeAction) {
+        excludeEpcFromDisplay(epc);
+      } else {
+        includeEpcInLive(epc);
+      }
+    };
+
+    return (
+      <button
+        type="button"
+        className={`inline-flex items-center justify-center gap-1 rounded-md border border-[#52c7da]/38 bg-white/48 text-[10px] font-semibold text-[#166B78] backdrop-blur-md hover:bg-white/78 ${
+          compact ? 'h-9 w-full' : 'h-7 px-2'
+        }`}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleAction();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          handleAction();
+        }}
+        title={isExcludeAction ? 'Exclude EPC from live table' : 'Include EPC back to live table'}
+      >
+        {isExcludeAction ? <FilterX size={13} /> : <RotateCcw size={13} />}
+        {isExcludeAction ? 'EXCLUDE' : 'INCLUDE'}
+      </button>
+    );
+  };
+
+  const TagRow = ({
+    action,
+    index,
+    style,
+    tag,
+    variant,
+  }: {
+    action: 'exclude' | 'include';
+    index: number;
+    style: React.CSSProperties;
+    tag: Tag;
+    variant: TableVariant;
+  }) => {
+    const freshness = tag.timestamp ? tag.freshness ?? 1 : 0.48;
+    const rowOpacity = 0.36 + (freshness * 0.64);
+    const isDesktop = variant === 'desktop';
+    const tableColumns = isDesktop ? DESKTOP_TAG_TABLE_COLUMNS : TABLET_TAG_TABLE_COLUMNS;
+    const tableMinWidth = isDesktop ? DESKTOP_TABLE_MIN_WIDTH : TABLET_TABLE_MIN_WIDTH;
 
     return (
       <div
         style={{
           ...style,
+          minWidth: tableMinWidth,
           opacity: rowOpacity,
-          background: rowBackground,
           display: 'grid',
-          gridTemplateColumns: '44px minmax(18rem, 1fr) 72px 56px 86px 84px',
+          gridTemplateColumns: tableColumns,
           alignItems: 'center',
-          transition: 'opacity 500ms ease, background 500ms ease',
         }}
-        className="border-b border-[#E5E5EA] px-3 text-xs font-mono text-[#424245]"
+        className="soft-table-row border-b border-[#DDECEF]/80 px-3 text-xs font-mono text-[#263B40]"
       >
-        <div className="text-[#A1A1A6] font-semibold">{index + 1}</div>
-        <div
-          className="min-w-0 font-bold truncate pr-2"
-          title={tag.epc}
-          style={{ color: `rgba(0,64,170,${epcAlpha})` }}
-        >
-          {tag.epc}
-        </div>
-        <div
-          className="text-right font-bold"
-          style={{ color: `rgba(36,138,61,${rssiAlpha})` }}
-        >
-          {tag.lastRssi ?? tag.rssi}
-        </div>
-        <div className="text-right font-bold text-[#424245]">
-          {tag.count}
-        </div>
-        <div className="flex justify-end pl-2">
-            <Button 
-                size="sm" 
-                variant="secondary" 
-                className="h-6 text-[10px] px-2 py-0 min-w-0"
-                disabled={isScanning}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onLocate(tag.epc);
-                }}
-            >
-                LOCATE
-            </Button>
-        </div>
-        <div className="text-right font-semibold text-[#6E6E73] pl-2">
-          {formatLastSeen(tag.lastSeen)}
+        <div className="font-semibold text-[#7A8E92]">{index + 1}</div>
+        <EpcCell epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
+        <SignalCell tag={tag} />
+        <div className="text-right font-bold text-[#166B78]">{formatCount(tag.count)}</div>
+        {isDesktop && (
+          <div className="text-right font-semibold text-[#52666B]">{formatClock(tag.firstSeen ?? tag.timestamp)}</div>
+        )}
+        <div className="text-right font-semibold text-[#52666B]">{formatClock(tag.lastSeen)}</div>
+        <div className="flex justify-end">
+          <TagActionButton action={action} epc={tag.epc} />
         </div>
       </div>
     );
   };
 
-  return (
-    <div className="flex flex-col h-full gap-3 p-3 md:p-5 bg-[#F5F5F7]">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-        <div className="rounded-lg border border-[#D2D2D7] bg-white p-3 shadow-sm">
-          <p className="text-[10px] font-semibold text-[#6E6E73]">VISIBLE EPC</p>
-          <p className="mt-1 text-2xl font-semibold text-[#1D1D1F]">
-            {displayedTags.length}
-            {excludeTokens.length > 0 && <span className="text-sm text-[#86868B]"> / {stats.visibleTags}</span>}
-          </p>
-        </div>
-        <div className="rounded-lg border border-[#D2D2D7] bg-white p-3 shadow-sm">
-          <p className="text-[10px] font-semibold text-[#6E6E73]">TAG COUNT/S</p>
-          <p className="mt-1 text-2xl font-semibold text-[#007AFF]">{formatRate(stats.readsPerSecond)}</p>
-        </div>
-        <div className="rounded-lg border border-[#D2D2D7] bg-white p-3 shadow-sm">
-          <p className="text-[10px] font-semibold text-[#6E6E73]">RSSI AVG</p>
-          <p className="mt-1 text-2xl font-semibold text-[#248A3D]">{formatRssi(displayedRssiAverage)}</p>
-        </div>
-        <div className="rounded-lg border border-[#D2D2D7] bg-white p-3 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold text-[#6E6E73]">EXCLUDE EPC</p>
-            <FilterX size={14} className={excludeTokens.length > 0 ? 'text-[#FF3B30]' : 'text-[#A1A1A6]'} />
+  const MobileMetric = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="rounded-md border border-[#DDECEF]/80 bg-white/52 px-2 py-1.5">
+      <p className="text-[9px] font-bold uppercase tracking-wide text-[#7A8E92]">{label}</p>
+      <div className="mt-0.5 font-mono text-xs font-bold text-[#166B78]">{children}</div>
+    </div>
+  );
+
+  const MobileTagCard = ({
+    action,
+    index,
+    style,
+    tag,
+  }: {
+    action: 'exclude' | 'include';
+    index: number;
+    style: React.CSSProperties;
+    tag: Tag;
+  }) => {
+    const freshness = tag.timestamp ? tag.freshness ?? 1 : 0.48;
+    const rowOpacity = 0.36 + (freshness * 0.64);
+
+    return (
+      <div
+        style={{
+          ...style,
+          boxSizing: 'border-box',
+          opacity: rowOpacity,
+          padding: '5px 8px',
+        }}
+      >
+        <div className="soft-table-row flex h-full flex-col gap-2 rounded-lg border border-[#DDECEF]/80 p-3 text-xs shadow-sm shadow-[#124E5A]/5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-7 shrink-0 items-center justify-center rounded-md bg-[#F3FCFE] font-mono text-[11px] font-bold text-[#7A8E92]">
+              {index + 1}
+            </span>
+            <EpcCell className="pr-0" epc={tag.epc} isCopied={copiedEpc === tag.epc} onCopy={copyEpcToClipboard} />
           </div>
-          <div className="mt-2 flex items-center gap-2 rounded-lg border border-[#D2D2D7] bg-[#FBFBFD] px-2">
-            <Search size={14} className="text-[#86868B] shrink-0" />
-            <input
-              value={excludeFilter}
-              onChange={(event) => setExcludeFilter(event.target.value.toUpperCase())}
-              placeholder="EPC prefix, comma separated"
-              className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-[#1D1D1F] placeholder-[#A1A1A6] outline-none"
+
+          <div className="grid grid-cols-2 gap-2">
+            <MobileMetric label="Signal"><SignalCell compact tag={tag} /></MobileMetric>
+            <MobileMetric label="Count">{formatCount(tag.count)}</MobileMetric>
+            <MobileMetric label="1st Seen">{formatClock(tag.firstSeen ?? tag.timestamp)}</MobileMetric>
+            <MobileMetric label="Last Seen">{formatClock(tag.lastSeen)}</MobileMetric>
+          </div>
+
+          <TagActionButton action={action} compact epc={tag.epc} />
+        </div>
+      </div>
+    );
+  };
+
+  const LiveRow = ({ index, style }: { index: number; style: React.CSSProperties }) => (
+    displayedTags[index]
+      ? viewportMode === 'phone'
+        ? <MobileTagCard action="exclude" index={index} style={style} tag={displayedTags[index]} />
+        : <TagRow action="exclude" index={index} style={style} tag={displayedTags[index]} variant={tableVariant} />
+      : null
+  );
+
+  const ExcludedRow = ({ index, style }: { index: number; style: React.CSSProperties }) => (
+    excludedTags[index]
+      ? viewportMode === 'phone'
+        ? <MobileTagCard action="include" index={index} style={style} tag={excludedTags[index]} />
+        : <TagRow action="include" index={index} style={style} tag={excludedTags[index]} variant={tableVariant} />
+      : null
+  );
+
+  const StatBlock = ({ label, value, tone = 'dark' }: { label: string; value: React.ReactNode; tone?: 'dark' | 'accent' | 'muted' }) => (
+    <div className="border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6E7F83]">{label}</p>
+      <p className={`mt-1 text-xl font-semibold sm:text-2xl ${tone === 'accent' ? 'text-[#166B78]' : tone === 'muted' ? 'text-[#6E7F83]' : 'text-[#1D1D1F]'}`}>
+        {value}
+      </p>
+    </div>
+  );
+
+  const RatePulse = ({ values }: { values: number[] }) => {
+    const normalizedValues = values.length > 0 ? values : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const maxValue = Math.max(1, ...normalizedValues);
+
+    return (
+      <div className="flex h-9 items-end gap-1" aria-hidden="true">
+        {normalizedValues.slice(-14).map((value, index) => (
+          <span
+            key={`${index}-${value}`}
+            className="w-1.5 rounded-full bg-[#52c7da]/70 shadow-[0_0_10px_rgba(82,199,218,0.18)]"
+            style={{ height: `${Math.max(5, (value / maxValue) * 34)}px`, opacity: 0.28 + (value / maxValue) * 0.72 }}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  const RateStatBlock = () => (
+    <div className="border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6E7F83]">Tag Count/s</p>
+      <div className="mt-1 flex items-end justify-between gap-4">
+        <p className="text-2xl font-semibold text-[#166B78] sm:text-3xl">{formatRate(stats.readsPerSecond)}</p>
+        <RatePulse values={rateHistory} />
+      </div>
+    </div>
+  );
+
+  const TableHeader = ({ variant }: { variant: TableVariant }) => {
+    const isDesktop = variant === 'desktop';
+    const tableColumns = isDesktop ? DESKTOP_TAG_TABLE_COLUMNS : TABLET_TAG_TABLE_COLUMNS;
+    const tableMinWidth = isDesktop ? DESKTOP_TABLE_MIN_WIDTH : TABLET_TABLE_MIN_WIDTH;
+
+    return (
+    <div className="overflow-x-auto">
+      <div
+        className="soft-table-head grid items-center border-b border-[#DDECEF]/75 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#52666B]"
+        style={{ gridTemplateColumns: tableColumns, minWidth: tableMinWidth }}
+      >
+        <div>#</div>
+        <div>EPC</div>
+        <div className="text-right">Signal</div>
+        <div className="text-right">Count</div>
+        {isDesktop && <div className="text-right">1st Seen</div>}
+        <div className="text-right">Last Seen</div>
+        <div className="text-right">Action</div>
+      </div>
+    </div>
+    );
+  };
+
+  return (
+    <div className="flex h-full flex-col gap-3 bg-transparent p-2 sm:p-3 md:p-5">
+      <section className="soft-glass rounded-lg">
+        <div className="flex flex-col gap-3 border-b border-[#DDECEF]/75 p-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant={activeScanType === 'interactive' ? 'danger' : 'success'}
+              onClick={activeScanType === 'interactive' ? onStopScan : onStartScan}
+              disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
+              className={`h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none ${activeScanType !== 'interactive' ? 'bg-[#52c7da] border-[#52c7da] hover:bg-[#42b9cc]' : ''}`}
+            >
+              {isBatchSaving && activeScanType !== 'interactive' ? (
+                <><Database size={14} /> SAVING...</>
+              ) : activeScanType === 'interactive' ? (
+                <><Square size={14} fill="currentColor" /> STOP SCAN</>
+              ) : (
+                <><Play size={14} fill="currentColor" /> START SCAN</>
+              )}
+            </Button>
+
+            <Button
+              variant={activeScanType === 'batch' ? 'danger' : 'secondary'}
+              onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
+              disabled={activeScanType === 'interactive' || isBatchSaving}
+              className="h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none"
+            >
+              {isBatchSaving ? (
+                <>SAVING {Math.round(batchSaveInfo.progress)}%</>
+              ) : activeScanType === 'batch' ? (
+                <>STOP BATCH</>
+              ) : (
+                <>BATCH MODE</>
+              )}
+            </Button>
+
+            <div className="soft-surface relative ml-0 inline-grid min-w-[218px] flex-1 grid-cols-3 rounded-md border border-[#52c7da]/20 p-1 sm:flex-none lg:ml-2">
+              <span
+                aria-hidden="true"
+                className="absolute bottom-1 left-1 top-1 rounded bg-white/82 shadow-sm shadow-[#52c7da]/12 ring-1 ring-[#52c7da]/16 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                style={presetIndicatorStyle}
+              />
+              {PRESET_OPTIONS.map((preset) => (
+                <button
+                  key={preset.mode}
+                  type="button"
+                  onClick={() => handlePresetClick(preset.mode)}
+                  disabled={isBatchSaving}
+                  aria-label={`${preset.label}: ${preset.description}`}
+                  className={`group relative z-10 h-7 px-3 text-[10px] font-semibold uppercase transition-colors focus:outline-none focus-visible:text-[#166B78] ${
+                    activePreset === preset.mode
+                      ? 'text-[#166B78]'
+                      : 'text-[#52666B] hover:bg-white/45 hover:text-[#166B78]'
+                  } disabled:opacity-40`}
+                >
+                  {preset.label}
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute left-1/2 top-[calc(100%+10px)] z-50 block w-64 -translate-x-1/2 -translate-y-1 scale-95 rounded-lg border border-[#52c7da]/24 bg-white/90 p-3 text-left normal-case text-[#52666B] opacity-0 shadow-[0_18px_50px_rgba(18,78,90,0.14)] backdrop-blur-xl transition-all duration-200 group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-focus:translate-y-0 group-focus:scale-100 group-focus:opacity-100"
+                  >
+                    <span className="block text-[10px] font-bold uppercase tracking-wide text-[#166B78]">{preset.title}</span>
+                    <span className="mt-1 block text-[11px] font-medium leading-4 text-[#52666B]">{preset.description}</span>
+                    <span className="absolute bottom-full left-1/2 h-2 w-2 -translate-x-1/2 translate-y-1/2 rotate-45 border-l border-t border-[#52c7da]/24 bg-white/90" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="soft-surface flex h-12 min-w-[174px] flex-1 items-center justify-center rounded-lg border border-[#52c7da]/32 px-3 sm:flex-none sm:px-4">
+              <span className="seven-segment text-lg text-[#0C4F5B] sm:text-xl">{scanRuntime}</span>
+            </div>
+            <Button variant="outline" onClick={onClear} size="sm" className="h-10 border-[#DDECEF] sm:h-8">
+              CLEAR
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
+          <StatBlock label="Visible EPC" value={displayedTags.length} />
+          <StatBlock label="Total Reads" value={stats.totalReads} tone="accent" />
+          <RateStatBlock />
+          <StatBlock label="RSSI Avg" value={formatRssi(displayedRssiAverage)} />
+          <StatBlock label="Excluded" value={excludedEpcs.length} tone="muted" />
+        </div>
+      </section>
+
+      <section className="soft-glass flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg">
+        <div className="flex flex-col gap-2 border-b border-[#DDECEF]/75 bg-white/36 px-2 py-2 backdrop-blur-xl sm:px-3 md:flex-row md:items-center md:justify-between">
+          <div className="soft-surface relative inline-grid w-full grid-cols-2 rounded-md border border-[#52c7da]/20 p-1 sm:w-auto sm:min-w-[216px]">
+            <span
+              aria-hidden="true"
+              className="absolute bottom-1 left-1 top-1 rounded bg-white/82 shadow-sm shadow-[#52c7da]/12 ring-1 ring-[#52c7da]/16 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={scannerPanelIndicatorStyle}
             />
-            {excludeFilter && (
+            <button
+              type="button"
+              className={`relative z-10 h-9 px-2 text-xs font-semibold transition-colors focus:outline-none sm:h-8 sm:px-3 ${scannerPanel === 'live' ? 'text-[#166B78]' : 'text-[#52666B] hover:text-[#166B78]'}`}
+              onClick={() => setScannerPanel('live')}
+            >
+              LIVE TAGS {displayedTags.length}
+            </button>
+            <button
+              type="button"
+              className={`relative z-10 h-9 px-2 text-xs font-semibold transition-colors focus:outline-none sm:h-8 sm:px-3 ${scannerPanel === 'excluded' ? 'text-[#166B78]' : 'text-[#52666B] hover:text-[#166B78]'}`}
+              onClick={() => setScannerPanel('excluded')}
+            >
+              EXCLUDED {excludedTags.length}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 sm:flex-none">
+              <input
+                type="number"
+                min={0}
+                max={60000}
+                step={100}
+                value={displayedStaleRemoveMs}
+                onChange={(event) => handleStaleRemoveMsChange(Number(event.target.value))}
+                className="h-9 w-full min-w-[118px] rounded-md border border-[#52c7da]/20 bg-white/52 px-2 pr-9 text-center font-mono text-xs font-semibold text-[#166B78] outline-none backdrop-blur-md focus:border-[#52c7da]/55 sm:h-8 sm:w-28"
+                title="0 disables stale removal. Values below 100 are expanded to milliseconds, so 30 becomes 3000 ms."
+                aria-label="Stale remove timeout in milliseconds"
+              />
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-wide text-[#7A8E92]">
+                ms
+              </span>
+            </div>
+
+            {scannerPanel === 'excluded' && excludedEpcs.length > 0 && (
               <button
-                onClick={() => setExcludeFilter('')}
-                className="text-[10px] font-semibold text-[#007AFF]"
+                className="inline-flex h-9 items-center rounded-md border border-[#52c7da]/22 bg-white/52 px-3 text-xs font-semibold text-[#52666B] backdrop-blur-md transition-colors hover:border-[#52c7da]/45 hover:bg-white/78 hover:text-[#166B78] sm:h-8"
+                onClick={() => setExcludedEpcs([])}
               >
-                RESET
+                CLEAR EXCLUDED
               </button>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Presets */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
-        <Button 
-          variant="secondary" 
-          size="sm" 
-          onClick={() => handlePresetClick('standard')} 
-          disabled={isBatchSaving}
-          className={`text-[10px] h-8 transition-colors ${activePreset === 'standard' ? 'bg-[#007AFF]/10 border-[#007AFF]/30 text-[#007AFF]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
-        >
-          STANDARD (INVENTORY)
-        </Button>
-        <Button 
-          variant="secondary" 
-          size="sm" 
-          onClick={() => handlePresetClick('quick')} 
-          disabled={isBatchSaving}
-          className={`text-[10px] h-8 transition-colors ${activePreset === 'quick' ? 'bg-[#34C759]/10 border-[#34C759]/30 text-[#248A3D]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
-        >
-          QUICK (RETAIL)
-        </Button>
-        <Button 
-          variant="secondary" 
-          size="sm" 
-          onClick={() => handlePresetClick('deep')} 
-          disabled={isBatchSaving}
-          className={`text-[10px] h-8 transition-colors ${activePreset === 'deep' ? 'bg-[#AF52DE]/10 border-[#AF52DE]/30 text-[#8E44AD]' : 'bg-white border-[#D2D2D7] text-[#424245]'}`}
-        >
-          DEEP (INDUSTRIAL)
-        </Button>
-      </div>
-
-      {/* Controls */}
-      <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 bg-white p-2 rounded-lg border border-[#D2D2D7] shadow-sm">
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <Button 
-            variant={activeScanType === 'interactive' ? 'danger' : 'success'} 
-            onClick={activeScanType === 'interactive' ? onStopScan : onStartScan}
-            disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
-            className="flex-1 md:min-w-[120px] h-8 text-xs"
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div
+            className="flex h-full transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={scannerPanelTrackStyle}
           >
-            {isBatchSaving && activeScanType !== 'interactive' ? (
-              <><Database size={14} /> SAVING...</>
-            ) : activeScanType === 'interactive' ? (
-              <><Square size={14} fill="currentColor" /> STOP SCAN</>
-            ) : (
-              <><Play size={14} fill="currentColor" /> START SCAN</>
-            )}
-          </Button>
-          
-          <Button 
-            variant={activeScanType === 'batch' ? 'danger' : 'secondary'} 
-            onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
-            disabled={activeScanType === 'interactive' || isBatchSaving}
-            className="flex-1 md:min-w-[120px] h-8 text-xs"
-          >
-            {isBatchSaving ? (
-              <><Database size={14} /> SAVING {Math.round(batchSaveInfo.progress)}%</>
-            ) : activeScanType === 'batch' ? (
-              <><Square size={14} fill="currentColor" /> STOP BATCH</>
-            ) : (
-              <><Database size={14} /> BATCH MODE</>
-            )}
-          </Button>
-        </div>
-
-        <div className="flex-1 hidden md:block" />
-
-        <div className="flex items-center justify-between w-full md:w-auto gap-2 text-[#6E6E73] text-xs font-semibold px-2">
-          <div className="flex items-center gap-2">
-            <Activity size={14} className={isScanning ? 'text-[#34C759] animate-pulse' : 'text-[#A1A1A6]'} />
-            <span>
-              {isBatchSaving
-                ? `SAVING ${Math.round(batchSaveInfo.progress)}%`
-                : `${displayedTags.length} TAGS`}
-            </span>
-          </div>
-          <Button variant="outline" onClick={onClear} size="sm" className="h-8">
-            <Trash2 size={14} /> CLEAR
-          </Button>
-        </div>
-
-      </div>
-
-      {/* Data Table */}
-      <div className="flex-1 bg-white rounded-lg border border-[#D2D2D7] overflow-hidden flex flex-col shadow-sm">
-        <div
-          className="grid items-center bg-[#FBFBFD] border-b border-[#E5E5EA] px-3 py-2 text-[10px] font-semibold text-[#6E6E73]"
-          style={{ gridTemplateColumns: '44px minmax(18rem, 1fr) 72px 56px 86px 84px' }}
-        >
-          <div>#</div>
-          <div className="min-w-0 pr-2">EPC</div>
-          <div className="text-right">RSSI</div>
-          <div className="text-right">#</div>
-          <div className="text-right pl-2">ACT</div>
-          <div className="text-right pl-2">LAST SEEN</div>
-        </div>
-        
-        <div className="flex-1 relative">
-          {displayedTags.length === 0 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-[#A1A1A6] gap-2">
-              <Database size={32} strokeWidth={1} />
-              <p className="font-mono text-xs">{tags.length > 0 ? 'All tags hidden by filter' : 'No Data'}</p>
+            <div
+              className={`flex min-h-0 w-1/2 shrink-0 flex-col overflow-hidden ${scannerPanel === 'live' ? '' : 'pointer-events-none'}`}
+              aria-hidden={scannerPanel !== 'live'}
+            >
+              {viewportMode !== 'phone' && <TableHeader variant={tableVariant} />}
+              <div className={`relative min-h-0 flex-1 ${viewportMode === 'phone' ? 'overflow-hidden' : 'overflow-x-auto'}`}>
+                {displayedTags.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[#7A8E92]">
+                    <Database size={32} strokeWidth={1} />
+                    <p className="font-mono text-xs">{tags.length > 0 ? 'All live tags are excluded' : 'No tags'}</p>
+                  </div>
+                ) : (
+                  <AutoSizer>
+                    {({ height, width }) => (
+                      <List
+                        ref={listRef}
+                        height={height}
+                        width={viewportMode === 'phone' ? width : Math.max(width, activeTableMinWidth)}
+                        itemCount={displayedTags.length}
+                        itemSize={listItemSize}
+                      >
+                        {LiveRow}
+                      </List>
+                    )}
+                  </AutoSizer>
+                )}
+              </div>
             </div>
-          ) : (
-            <AutoSizer>
-              {({ height, width }) => (
-                <List
-                  ref={listRef}
-                  height={height}
-                  width={width}
-                  itemCount={displayedTags.length}
-                  itemSize={36}
-                >
-                  {Row}
-                </List>
-              )}
-            </AutoSizer>
-          )}
+
+            <div
+              className={`flex min-h-0 w-1/2 shrink-0 flex-col overflow-hidden ${scannerPanel === 'excluded' ? '' : 'pointer-events-none'}`}
+              aria-hidden={scannerPanel !== 'excluded'}
+            >
+              {viewportMode !== 'phone' && <TableHeader variant={tableVariant} />}
+              <div className={`relative min-h-0 flex-1 ${viewportMode === 'phone' ? 'overflow-hidden' : 'overflow-x-auto'}`}>
+                {excludedTags.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[#7A8E92]">
+                    <FilterX size={32} strokeWidth={1} />
+                    <p className="font-mono text-xs">No excluded EPCs</p>
+                  </div>
+                ) : (
+                  <AutoSizer>
+                    {({ height, width }) => (
+                      <List
+                        height={height}
+                        width={viewportMode === 'phone' ? width : Math.max(width, activeTableMinWidth)}
+                        itemCount={excludedTags.length}
+                        itemSize={listItemSize}
+                      >
+                        {ExcludedRow}
+                      </List>
+                    )}
+                  </AutoSizer>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

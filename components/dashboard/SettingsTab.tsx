@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Zap, Radio, Clock, Activity, Save, RefreshCw, Send } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
 import { Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
 
@@ -14,30 +12,42 @@ interface SettingsTabProps {
 }
 
 const LINK_PROFILES = [
-  { id: 11, label: "11: 640kHz, FM0" },
-  { id: 13, label: "13: 160kHz, Miller 8" },
-  { id: 53, label: "53: 640kHz, Miller 4" },
+  { id: 11, label: '11 - 640 kHz / FM0' },
+  { id: 13, label: '13 - 160 kHz / Miller 8' },
+  { id: 53, label: '53 - 640 kHz / Miller 4' },
 ];
 
+const DWELL_OPTIONS = Array.from({ length: 254 }, (_, index) => index + 2);
+const INTERVAL_OPTIONS = [0, 10, 20, 30, 40, 50, 60];
+const APPEND_OPTIONS = [0, 1, 2, 3, 4];
+const Q_OPTIONS = Array.from({ length: 16 }, (_, index) => index);
+const SESSION_OPTIONS = [0, 1, 2, 3];
+const PROFILE_SELECT_OPTIONS = LINK_PROFILES.map((item) => ({ label: item.label, value: item.id }));
+const DWELL_SELECT_OPTIONS = DWELL_OPTIONS.map((item) => ({ label: String(item), value: item }));
+const INTERVAL_SELECT_OPTIONS = INTERVAL_OPTIONS.map((item) => ({ label: `${item} ms`, value: item }));
+const APPEND_SELECT_OPTIONS = APPEND_OPTIONS.map((item) => ({ label: String(item), value: item }));
+const Q_SELECT_OPTIONS = Q_OPTIONS.map((item) => ({ label: String(item), value: item }));
+const SESSION_SELECT_OPTIONS = SESSION_OPTIONS.map((item) => ({ label: `S${item}`, value: item }));
+const FIELD_CLASS = 'soft-surface h-10 w-full rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#1D1D1F] outline-none focus:border-[#52c7da]/60 sm:h-9';
+const COMPACT_BUTTON_CLASS = 'h-10 text-[10px] font-bold tracking-wide sm:h-8';
+const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
+type SelectOption = { label: string; value: number };
+
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
-  // --- Local State for Inputs ---
   const [power, setPower] = useState(settings.power);
   const [profile, setProfile] = useState(settings.linkProfile);
   const [qValue, setQValue] = useState(settings.qValue);
   const [session, setSession] = useState(settings.session);
-  
-  const [interval, setInterval] = useState(settings.scanParams?.interval || 0);
+  const [queryInterval, setQueryInterval] = useState(settings.scanParams?.interval || 0);
   const [dwell, setDwell] = useState(settings.scanParams?.dwell || 0);
+  const [openSelect, setOpenSelect] = useState<SelectFieldId | null>(null);
   const [append, setAppend] = useState(settings.scanParams?.append || 0);
-  
   const [tagFocus, setTagFocus] = useState(settings.tagFocus);
-
-  // Popup State
   const [popupContent, setPopupContent] = useState('Hello!');
   const [popupTime, setPopupTime] = useState(2000);
   const [popupBeep, setPopupBeep] = useState(true);
 
-  // Sync local state when settings prop updates (from GET responses)
   useEffect(() => {
     setPower(settings.power);
     setProfile(settings.linkProfile);
@@ -45,297 +55,318 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     setSession(settings.session);
     setTagFocus(settings.tagFocus);
     if (settings.scanParams) {
-        setInterval(settings.scanParams.interval);
-        setDwell(settings.scanParams.dwell);
-        setAppend(settings.scanParams.append || 0);
+      setQueryInterval(settings.scanParams.interval);
+      setDwell(settings.scanParams.dwell);
+      setAppend(settings.scanParams.append || 0);
     }
   }, [settings]);
 
-  // --- Handlers ---
-
-  // Block 1: Power
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
-
-  // Block 2: Profile
   const handleGetProfile = () => bleService.getProfile();
-  const handleSetProfile = () => {
-    // Use specific SLP command
-    bleService.setLinkProfile(profile);
-  };
-
-  // Block 3: EPC Gen2 (Q & Session)
+  const handleSetProfile = () => bleService.setLinkProfile(profile);
   const handleGetQSession = () => bleService.getQSession();
-  const handleSetQSession = () => {
-    // Use specific SQS command
-    bleService.setQSession(qValue, session);
-  };
-
-  // Block 4: Query Params
+  const handleSetQSession = () => bleService.setQSession(qValue, session);
   const handleGetQueryParams = () => bleService.getQueryParam();
-  const handleSetQueryParams = () => bleService.setQueryParam(interval, dwell, append);
-
-  // Block 5: Tag Focus
+  const handleSetQueryParams = () => bleService.setQueryParam(queryInterval, dwell, append);
   const handleGetTagFocus = () => bleService.getTagFocus();
   const handleSetTagFocus = () => bleService.setTagFocus(tagFocus);
+  const adjustPower = (delta: number) => setPower((current) => clampNumber(current + delta, 0, 30));
+
+  const Card = ({
+    children,
+    className = '',
+    subtitle,
+    title,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    subtitle?: string;
+    title: string;
+  }) => (
+    <section className={`soft-glass rounded-lg p-3 ${className}`}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
+          {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+
+  const ActionRow = ({ onGet, onSet }: { onGet: () => void; onSet: () => void }) => (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      <Button onClick={onGet} variant="secondary" size="sm" className={COMPACT_BUTTON_CLASS}>GET</Button>
+      <Button onClick={onSet} variant="primary" size="sm" className={COMPACT_BUTTON_CLASS}>SET</Button>
+    </div>
+  );
+
+  const FieldLabel = ({ children }: { children: React.ReactNode }) => (
+    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#6E7F83]">{children}</label>
+  );
+
+  const SelectField = ({
+    id,
+    onChange,
+    options,
+    value,
+  }: {
+    id: SelectFieldId;
+    onChange: (value: number) => void;
+    options: SelectOption[];
+    value: number;
+  }) => {
+    const selectRef = useRef<HTMLDivElement>(null);
+    const isOpen = openSelect === id;
+    const selectedOption = options.find((option) => option.value === value);
+
+    useEffect(() => {
+      if (!isOpen) return;
+
+      const handlePointerDown = (event: PointerEvent) => {
+        if (!selectRef.current?.contains(event.target as Node)) {
+          setOpenSelect(null);
+        }
+      };
+
+      window.addEventListener('pointerdown', handlePointerDown);
+      return () => window.removeEventListener('pointerdown', handlePointerDown);
+    }, [isOpen]);
+
+    return (
+      <div ref={selectRef} className="relative">
+        <button
+          type="button"
+          className={`${FIELD_CLASS} flex items-center justify-between text-left`}
+          aria-expanded={isOpen}
+          aria-haspopup="listbox"
+          onClick={() => setOpenSelect((current) => current === id ? null : id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpenSelect(null);
+            }
+          }}
+        >
+          <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
+          <span className="shrink-0 text-[#7A8E92]">{isOpen ? '^' : 'v'}</span>
+        </button>
+
+        {isOpen && (
+          <div
+            role="listbox"
+            className="absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 overflow-y-auto rounded-md border border-[#52c7da]/20 bg-white p-1 shadow-sm"
+          >
+            {options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={value === option.value}
+                className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
+                  value === option.value ? 'bg-[#F3FCFE] text-[#166B78]' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
+                }`}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpenSelect(null);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto bg-slate-950">
-      
-      {/* Block 1: Power Control */}
-      <div className="bg-slate-900 p-4 rounded-sm border border-slate-800 space-y-4">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-          <div className="flex items-center gap-2">
-            <Zap size={16} className="text-orange-500" />
-            <h3 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Power Control</h3>
+    <div className="h-full overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+      <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Card title="Power" subtitle="RF output">
+          <div className="flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => adjustPower(-1)}
+              className="h-11 w-11 rounded-md border border-[#52c7da]/22 bg-white/54 text-xl font-semibold text-[#166B78] shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
+            >
+              -
+            </button>
+            <div className="min-w-[104px] rounded-lg border border-[#52c7da]/18 bg-white/48 px-3 py-2 text-center">
+              <div className="font-mono text-3xl font-bold text-[#0C4F5B]">{power}</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-[#7A8E92]">dBm</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => adjustPower(1)}
+              className="h-11 w-11 rounded-md border border-[#52c7da]/22 bg-white/54 text-xl font-semibold text-[#166B78] shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
+            >
+              +
+            </button>
           </div>
-          <span className="font-mono text-lg font-bold text-orange-500">{power} <span className="text-[10px] text-slate-600">dBm</span></span>
-        </div>
-        
-        <div className="px-2">
-            <input 
-              type="range" 
-              min="0" 
-              max="30" 
-              value={power} 
-              onChange={(e) => setPower(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-orange-600"
-            />
-        </div>
+          <ActionRow onGet={handleGetPower} onSet={handleSetPower} />
+        </Card>
 
-        <div className="flex gap-2">
-            <Button onClick={handleGetPower} variant="secondary" size="sm" className="flex-1 h-8 text-[10px]">
-                <RefreshCw size={12} className="mr-1" /> GET
-            </Button>
-            <Button onClick={handleSetPower} variant="primary" size="sm" className="flex-1 h-8 text-[10px]">
-                <Send size={12} className="mr-1" /> SET
-            </Button>
-        </div>
-      </div>
-
-      {/* Block 2: RF Link Profile */}
-      <div className="bg-slate-900 p-4 rounded-sm border border-slate-800 space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-          <Activity size={16} className="text-indigo-500" />
-          <h3 className="font-bold text-slate-200 text-xs uppercase tracking-wide">RF Link Profile</h3>
-        </div>
-        
-        <select 
-          value={profile} 
-          onChange={(e) => setProfile(parseInt(e.target.value))}
-          className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
+        <Card
+          title="RF Link Profile"
+          subtitle="Backscatter link"
+          className={`relative overflow-visible ${openSelect === 'profile' ? 'z-[120]' : 'z-10'}`}
         >
-          {LINK_PROFILES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
+          <SelectField
+            id="profile"
+            value={profile}
+            options={PROFILE_SELECT_OPTIONS}
+            onChange={setProfile}
+          />
+          <ActionRow onGet={handleGetProfile} onSet={handleSetProfile} />
+        </Card>
 
-        <div className="flex gap-2">
-            <Button onClick={handleGetProfile} variant="secondary" size="sm" className="flex-1 h-8 text-[10px]">
-                <RefreshCw size={12} className="mr-1" /> GET
-            </Button>
-            <Button onClick={handleSetProfile} variant="primary" size="sm" className="flex-1 h-8 text-[10px]">
-                <Send size={12} className="mr-1" /> SET
-            </Button>
-        </div>
-      </div>
+        <Card
+          title="EPC Gen2"
+          subtitle="Q and session"
+          className={`relative overflow-visible ${openSelect === 'q' || openSelect === 'session' ? 'z-[120]' : 'z-10'}`}
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <FieldLabel>Q</FieldLabel>
+              <SelectField
+                id="q"
+                value={qValue}
+                options={Q_SELECT_OPTIONS}
+                onChange={setQValue}
+              />
+            </div>
+            <div>
+              <FieldLabel>Session</FieldLabel>
+              <SelectField
+                id="session"
+                value={session}
+                options={SESSION_SELECT_OPTIONS}
+                onChange={setSession}
+              />
+            </div>
+          </div>
+          <ActionRow onGet={handleGetQSession} onSet={handleSetQSession} />
+        </Card>
 
-      {/* Block 3: EPC Gen2 (Q & Session) */}
-      <div className="bg-slate-900 p-4 rounded-sm border border-slate-800 space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-          <Radio size={16} className="text-blue-500" />
-          <h3 className="font-bold text-slate-200 text-xs uppercase tracking-wide">EPC Gen2 (Q & Session)</h3>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Q Value</label>
-              <select 
-                value={qValue} 
-                onChange={(e) => setQValue(parseInt(e.target.value))}
-                className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
+        <Card title="Tag Focus" subtitle="Singulation assist">
+          <div className="grid grid-cols-2 rounded-md border border-[#52c7da]/20 bg-white/46 p-1">
+            {[
+              { label: 'OFF', value: false },
+              { label: 'ON', value: true },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => setTagFocus(item.value)}
+                className={`h-10 rounded text-xs font-bold transition-colors sm:h-9 ${
+                  tagFocus === item.value ? 'bg-white text-[#166B78] shadow-sm' : 'text-[#6E7F83] hover:text-[#166B78]'
+                }`}
               >
-                {[...Array(16)].map((_, i) => <option key={i} value={i}>{i}</option>)}
-              </select>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <ActionRow onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
+        </Card>
+
+        <Card
+          title="Query Parameter"
+          subtitle="Inventory timing"
+          className={`relative overflow-visible xl:col-span-2 ${openSelect === 'interval' || openSelect === 'dwell' || openSelect === 'append' ? 'z-[120]' : 'z-10'}`}
+        >
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div>
+              <FieldLabel>Interval</FieldLabel>
+              <SelectField
+                id="interval"
+                value={queryInterval}
+                options={INTERVAL_SELECT_OPTIONS}
+                onChange={setQueryInterval}
+              />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Session</label>
-              <select 
-                value={session} 
-                onChange={(e) => setSession(parseInt(e.target.value))}
-                className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
+            <div>
+              <FieldLabel>Dwell</FieldLabel>
+              <SelectField
+                id="dwell"
+                value={clampNumber(dwell, 2, 255)}
+                options={DWELL_SELECT_OPTIONS}
+                onChange={setDwell}
+              />
+            </div>
+            <div>
+              <FieldLabel>Append</FieldLabel>
+              <SelectField
+                id="append"
+                value={append}
+                options={APPEND_SELECT_OPTIONS}
+                onChange={setAppend}
+              />
+            </div>
+          </div>
+          <ActionRow onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
+        </Card>
+
+        <Card title="Device Popup" subtitle="Display test" className="xl:col-span-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px_104px]">
+            <div>
+              <FieldLabel>Content</FieldLabel>
+              <input
+                type="text"
+                value={popupContent}
+                onChange={(event) => setPopupContent(event.target.value.substring(0, 15))}
+                maxLength={15}
+                className={`${FIELD_CLASS} font-mono`}
+              />
+            </div>
+            <div>
+              <FieldLabel>Time</FieldLabel>
+              <input
+                type="number"
+                value={popupTime}
+                min={100}
+                max={10000}
+                onChange={(event) => setPopupTime(Number(event.target.value))}
+                className={`${FIELD_CLASS} text-right font-mono`}
+              />
+            </div>
+            <div>
+              <FieldLabel>Beep</FieldLabel>
+              <button
+                type="button"
+                onClick={() => setPopupBeep((current) => !current)}
+                className={`h-10 w-full rounded-md border text-xs font-bold transition-colors sm:h-9 ${
+                  popupBeep
+                    ? 'border-[#52c7da]/36 bg-white text-[#166B78]'
+                    : 'border-[#52c7da]/20 bg-white/48 text-[#7A8E92]'
+                }`}
               >
-                {[0, 1, 2, 3].map(i => <option key={i} value={i}>S{i}</option>)}
-              </select>
+                {popupBeep ? 'ON' : 'OFF'}
+              </button>
             </div>
-        </div>
-
-        <div className="flex gap-2">
-            <Button onClick={handleGetQSession} variant="secondary" size="sm" className="flex-1 h-8 text-[10px]">
-                <RefreshCw size={12} className="mr-1" /> GET
-            </Button>
-            <Button onClick={handleSetQSession} variant="primary" size="sm" className="flex-1 h-8 text-[10px]">
-                <Send size={12} className="mr-1" /> SET
-            </Button>
-        </div>
-      </div>
-
-      {/* Block 4: Query Parameter */}
-      <div className="bg-slate-900 p-4 rounded-sm border border-slate-800 space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-          <Clock size={16} className="text-teal-500" />
-          <h3 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Query Parameter</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Interval (ms)</label>
-            <select 
-              value={interval} 
-              onChange={(e) => setInterval(parseInt(e.target.value))}
-              className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
-            >
-              {[0, 10, 20, 30, 40, 50, 60].map(val => (
-                <option key={val} value={val}>{val} ms</option>
-              ))}
-            </select>
           </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DWELL (RAW COUNT)</label>
-            <select 
-              value={dwell} 
-              onChange={(e) => setDwell(parseInt(e.target.value))}
-              className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
-            >
-              {/* 2 to 255 */}
-              {Array.from({ length: 254 }, (_, i) => i + 2).map(val => (
-                <option key={val} value={val}>{val}</option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Append</label>
-            <select 
-              value={append} 
-              onChange={(e) => setAppend(parseInt(e.target.value))}
-              className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded-sm font-bold text-xs text-slate-300 focus:outline-none focus:border-cyan-600"
-            >
-              {[0, 1, 2, 3, 4].map(val => (
-                <option key={val} value={val}>{val}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-            <Button onClick={handleGetQueryParams} variant="secondary" size="sm" className="flex-1 h-8 text-[10px]">
-                <RefreshCw size={12} className="mr-1" /> GET
-            </Button>
-            <Button onClick={handleSetQueryParams} variant="primary" size="sm" className="flex-1 h-8 text-[10px]">
-                <Send size={12} className="mr-1" /> SET
-            </Button>
-        </div>
-      </div>
-
-      {/* Block 5: Tag Focus */}
-      <div className="bg-slate-900 p-4 rounded-sm border border-slate-800 space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-          <Activity size={16} className="text-purple-500" />
-          <h3 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Tag Focus</h3>
-        </div>
-
-        <div className="flex items-center justify-between px-2">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
-            <div className="flex items-center gap-3">
-                <span className={`text-xs font-mono font-bold ${tagFocus ? 'text-purple-400' : 'text-slate-500'}`}>
-                    {tagFocus ? 'ENABLED' : 'DISABLED'}
-                </span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                        type="checkbox" 
-                        className="sr-only peer" 
-                        checked={tagFocus} 
-                        onChange={(e) => setTagFocus(e.target.checked)} 
-                    />
-                    <div className="w-9 h-5 bg-slate-950 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 peer-checked:after:bg-white"></div>
-                </label>
-            </div>
-        </div>
-
-        <div className="flex gap-2">
-            <Button onClick={handleGetTagFocus} variant="secondary" size="sm" className="flex-1 h-8 text-[10px]">
-                <RefreshCw size={12} className="mr-1" /> GET
-            </Button>
-            <Button onClick={handleSetTagFocus} variant="primary" size="sm" className="flex-1 h-8 text-[10px]">
-                <Send size={12} className="mr-1" /> SET
-            </Button>
-        </div>
-      </div>
-
-      {/* Device Popup Test */}
-      <div className="bg-slate-900 p-3 rounded-sm border border-slate-800 space-y-3">
-        <div className="flex items-center gap-2 text-cyan-500 mb-1">
-          <Activity size={16} />
-          <h3 className="text-xs font-bold uppercase tracking-wider">Device Popup Test</h3>
-        </div>
-        
-        <div className="space-y-2">
-            <div className="flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Content (Max 15)</span>
-                <Input 
-                    type="text" 
-                    value={popupContent} 
-                    onChange={(e) => setPopupContent(e.target.value.substring(0, 15))} 
-                    className="w-32 h-7 text-xs text-right font-mono"
-                    maxLength={15}
-                />
-            </div>
-            <div className="flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Time (ms)</span>
-                <Input 
-                    type="number" 
-                    value={popupTime} 
-                    onChange={(e) => setPopupTime(Number(e.target.value))} 
-                    className="w-24 h-7 text-xs text-right font-mono"
-                    min={100}
-                    max={10000}
-                />
-            </div>
-            <div className="flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Beep</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                        type="checkbox" 
-                        className="sr-only peer" 
-                        checked={popupBeep} 
-                        onChange={(e) => setPopupBeep(e.target.checked)} 
-                    />
-                    <div className="w-9 h-5 bg-slate-950 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600 peer-checked:after:bg-white"></div>
-                </label>
-            </div>
-        </div>
-
-        <Button 
-            onClick={() => onShowPopup(popupContent, popupTime, popupBeep)} 
-            variant="primary" 
-            size="sm" 
+          <Button
+            onClick={() => onShowPopup(popupContent, popupTime, popupBeep)}
+            variant="primary"
+            size="sm"
             fullWidth
-            className="h-8 text-[10px]"
-        >
-            <Send size={12} className="mr-1" /> TEST POPUP
-        </Button>
-      </div>
+            className={`${COMPACT_BUTTON_CLASS} mt-3`}
+          >
+            TEST POPUP
+          </Button>
+        </Card>
 
-      {/* Global Save */}
-      <div className="pt-4 border-t border-slate-800">
-        <Button 
-          fullWidth 
-          onClick={onSaveConfig} 
-          variant="danger" 
-          size="md" 
-          className="h-10 font-bold tracking-widest"
-        >
-          <Save size={18} className="mr-2" /> SAVE CONFIG TO FLASH
-        </Button>
-        <p className="text-center text-[10px] text-slate-600 mt-2 font-mono uppercase">Persist current settings to device memory</p>
+        <section className="soft-glass rounded-lg p-3 md:col-span-2 xl:col-span-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">Save Configuration</h3>
+              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">Persist current settings to device memory</p>
+            </div>
+            <Button onClick={onSaveConfig} variant="danger" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
+              SAVE CONFIG TO FLASH
+            </Button>
+          </div>
+        </section>
       </div>
     </div>
   );

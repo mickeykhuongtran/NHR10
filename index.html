@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
     <title>Nextwaves UHF RFID Scanner</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
         theme: {
@@ -48,19 +48,17 @@
         overflow: hidden;
         overscroll-behavior: none;
         -webkit-overflow-scrolling: touch;
-        background-color: #F9FAFB;
+        background-color: #F7FCFD;
         color: #0F172A;
       }
 
-      /* Subtle Solar Gradient */
       body::before {
         content: "";
         position: absolute;
-        width: 150vw;
-        height: 150vh;
-        top: -50%;
-        left: -20%;
-        background: radial-gradient(circle, rgba(34, 211, 238, 0.03) 0%, rgba(255,255,255,0) 60%);
+        inset: 0;
+        background:
+          linear-gradient(118deg, rgba(82, 199, 218, 0.16) 0%, rgba(255, 255, 255, 0) 36%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(240, 251, 253, 0.9) 100%);
         pointer-events: none;
         z-index: -1;
       }
@@ -81,16 +79,105 @@
         background: #94A3B8; 
       }
 
+      .app-space {
+        position: relative;
+        isolation: isolate;
+        background:
+          linear-gradient(135deg, #FFFFFF 0%, #F3FCFE 48%, #FFFFFF 100%);
+      }
+
+      .app-space::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          linear-gradient(90deg, rgba(82, 199, 218, 0.10), rgba(255, 255, 255, 0) 34%, rgba(82, 199, 218, 0.08)),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(235, 250, 253, 0.72));
+      }
+
+      .soft-glass,
       .glass-panel {
-        background: #FFFFFF;
-        border-radius: 16px;
-        border: 1px solid #E2E8F0;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.62));
+        border: 1px solid rgba(82, 199, 218, 0.28);
+        box-shadow:
+          0 24px 70px rgba(18, 78, 90, 0.08),
+          0 1px 0 rgba(255, 255, 255, 0.78) inset;
+        backdrop-filter: blur(22px) saturate(165%);
+        -webkit-backdrop-filter: blur(22px) saturate(165%);
+      }
+
+      .soft-glass-strong {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.68));
+        border-color: rgba(82, 199, 218, 0.30);
+        box-shadow:
+          0 18px 46px rgba(18, 78, 90, 0.07),
+          0 1px 0 rgba(255, 255, 255, 0.9) inset;
+        backdrop-filter: blur(24px) saturate(170%);
+        -webkit-backdrop-filter: blur(24px) saturate(170%);
+      }
+
+      .soft-surface {
+        background: rgba(255, 255, 255, 0.56);
+        border-color: rgba(82, 199, 218, 0.20);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+        backdrop-filter: blur(16px) saturate(150%);
+        -webkit-backdrop-filter: blur(16px) saturate(150%);
+      }
+
+      .soft-table-head {
+        background: rgba(255, 255, 255, 0.58);
+        backdrop-filter: blur(18px) saturate(155%);
+        -webkit-backdrop-filter: blur(18px) saturate(155%);
+      }
+
+      .soft-table-row {
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .soft-table-row:hover {
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .seven-segment {
+        font-family: "Orbitron", "DS-Digital", "Seven Segment", "SFMono-Regular", monospace;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0;
+        font-weight: 700;
+        text-shadow:
+          0 0 12px rgba(82, 199, 218, 0.18),
+          0 1px 0 rgba(255, 255, 255, 0.75);
+      }
+
+      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        .soft-glass,
+        .soft-glass-strong,
+        .soft-surface,
+        .soft-table-head {
+          background: #FFFFFF;
+        }
       }
       
       .custom-scrollbar {
         scrollbar-width: thin;
         scrollbar-color: #CBD5E1 transparent;
+      }
+
+      .scrollbar-none {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      .scrollbar-none::-webkit-scrollbar {
+        display: none;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        touch-action: manipulation;
       }
 
       /* Light system theme adapter for legacy dark utility classes. */

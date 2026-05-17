@@ -17,6 +17,7 @@ export interface ScanStats {
 export interface Tag {
   epc: string;
   timestamp: number;
+  firstSeen?: number;
   rssi?: number;
   count: number;
   antenna?: number;

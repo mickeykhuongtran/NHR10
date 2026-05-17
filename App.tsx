@@ -318,6 +318,12 @@ const handleDataReceived = useCallback((data: any) => {
       
       isScanning={scan.isScanning}
       activeScanType={scan.activeScanType}
+      scanStartedAt={scan.scanStartedAt}
+      scanStoppedAt={scan.scanStoppedAt}
+      removeStaleTags={scan.removeStaleTags}
+      staleRemoveMs={scan.staleRemoveMs}
+      onChangeRemoveStaleTags={scan.setRemoveStaleTags}
+      onChangeStaleRemoveMs={scan.setStaleRemoveMs}
       onStartScan={scan.startScan}
       onStopScan={() => {
         scan.stopScan();
