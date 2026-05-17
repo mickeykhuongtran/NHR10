@@ -6,6 +6,8 @@ const IDLE_BATTERY_POLL_INTERVAL_MS = 2000;
 const IDLE_BATTERY_TIMEOUT_MS = 6000;
 const SCAN_NO_TAGS_BATTERY_POLL_INTERVAL_MS = 3000;
 const SCAN_LIVE_TAGS_BATTERY_POLL_INTERVAL_MS = 5000;
+const BATCH_BATTERY_POLL_INTERVAL_MS = 10000;
+const BATCH_BATTERY_TIMEOUT_MS = 30000;
 const SCAN_ACTIVITY_TIMEOUT_MS = 9000;
 const HEARTBEAT_CHECK_INTERVAL_MS = 500;
 const TEMPERATURE_POLL_INTERVAL_MS = 5000;
@@ -23,14 +25,18 @@ const parseLinkProfile = (data: any): number | null => (
   parseFiniteNumber(data.val ?? data.profile ?? data.linkProfile ?? data.link_profile)
 );
 
+type InventoryMode = 'idle' | 'interactive' | 'batch' | 'batchSaving' | 'locate';
+
 export const useRFIDConnection = () => {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [inventoryActive, setInventoryActiveState] = useState(false);
+  const [inventoryMode, setInventoryModeState] = useState<InventoryMode>('idle');
   const lastBatteryHeartbeatRef = useRef<number | null>(null);
   const lastDeviceActivityRef = useRef<number | null>(null);
   const lastLiveTagsAtRef = useRef<number | null>(null);
   const lastBatteryPollAtRef = useRef(0);
   const inventoryActiveRef = useRef(false);
+  const inventoryModeRef = useRef<InventoryMode>('idle');
   const heartbeatTimeoutReportedRef = useRef(false);
   const [settings, setSettings] = useState<Settings>({
     power: 30,
@@ -81,11 +87,14 @@ export const useRFIDConnection = () => {
     markDeviceActivity('GB');
   }, [markDeviceActivity]);
 
-  const setInventoryActive = useCallback((active: boolean) => {
+  const setInventoryActive = useCallback((active: boolean, mode: InventoryMode = active ? 'interactive' : 'idle') => {
+    const nextMode = active ? mode : 'idle';
     inventoryActiveRef.current = active;
+    inventoryModeRef.current = nextMode;
     setInventoryActiveState(active);
-    if (active) {
-      markDeviceActivity('inventory');
+    setInventoryModeState(nextMode);
+    if (active && nextMode !== 'batch' && nextMode !== 'batchSaving') {
+      markDeviceActivity(nextMode);
     } else {
       lastLiveTagsAtRef.current = null;
     }
@@ -100,7 +109,9 @@ export const useRFIDConnection = () => {
     lastLiveTagsAtRef.current = null;
     lastBatteryPollAtRef.current = 0;
     inventoryActiveRef.current = false;
+    inventoryModeRef.current = 'idle';
     setInventoryActiveState(false);
+    setInventoryModeState('idle');
     bleService.disconnect();
     setStatus('disconnected');
     clearDeviceTelemetry();
@@ -195,7 +206,9 @@ export const useRFIDConnection = () => {
     lastLiveTagsAtRef.current = null;
     lastBatteryPollAtRef.current = 0;
     inventoryActiveRef.current = false;
+    inventoryModeRef.current = 'idle';
     setInventoryActiveState(false);
+    setInventoryModeState('idle');
     clearDeviceTelemetry();
     try {
       await bleService.connect();
@@ -226,7 +239,9 @@ export const useRFIDConnection = () => {
       lastLiveTagsAtRef.current = null;
       lastBatteryPollAtRef.current = 0;
       inventoryActiveRef.current = false;
+      inventoryModeRef.current = 'idle';
       setInventoryActiveState(false);
+      setInventoryModeState('idle');
       heartbeatTimeoutReportedRef.current = true;
       setStatus('error');
       clearDeviceTelemetry();
@@ -241,13 +256,18 @@ export const useRFIDConnection = () => {
     lastLiveTagsAtRef.current = null;
     lastBatteryPollAtRef.current = 0;
     inventoryActiveRef.current = false;
+    inventoryModeRef.current = 'idle';
     setInventoryActiveState(false);
+    setInventoryModeState('idle');
     bleService.disconnect();
     setStatus('disconnected');
     clearDeviceTelemetry();
   };
 
-  const getBatteryPollInterval = useCallback(() => {
+  const getBatteryPollInterval = useCallback((): number | null => {
+    const mode = inventoryModeRef.current;
+    if (mode === 'batch') return BATCH_BATTERY_POLL_INTERVAL_MS;
+    if (mode === 'batchSaving') return null;
     if (!inventoryActiveRef.current) return IDLE_BATTERY_POLL_INTERVAL_MS;
 
     const lastLiveTagsAt = lastLiveTagsAtRef.current;
@@ -263,18 +283,22 @@ export const useRFIDConnection = () => {
 
     if (status === 'connected') {
       const pollBattery = () => {
+        if (inventoryModeRef.current === 'batchSaving') return;
         lastBatteryPollAtRef.current = Date.now();
         void bleService.getBattery().catch(e => console.error("Battery poll failed", e));
       };
 
-      pollBattery();
+      if (getBatteryPollInterval() !== null) {
+        pollBattery();
+      }
       heartbeatPollId = window.setInterval(() => {
-        if (Date.now() - lastBatteryPollAtRef.current >= getBatteryPollInterval()) {
+        const batteryPollInterval = getBatteryPollInterval();
+        if (batteryPollInterval !== null && Date.now() - lastBatteryPollAtRef.current >= batteryPollInterval) {
           pollBattery();
         }
       }, HEARTBEAT_CHECK_INTERVAL_MS);
 
-      if (!inventoryActive) {
+      if (inventoryMode === 'idle') {
         temperaturePollId = window.setInterval(() => {
           void bleService.getTemperature().catch(e => console.error("Temp poll failed", e));
         }, TEMPERATURE_POLL_INTERVAL_MS);
@@ -285,13 +309,26 @@ export const useRFIDConnection = () => {
       if (heartbeatPollId !== null) window.clearInterval(heartbeatPollId);
       if (temperaturePollId !== null) window.clearInterval(temperaturePollId);
     };
-  }, [getBatteryPollInterval, inventoryActive, status]);
+  }, [getBatteryPollInterval, inventoryMode, status]);
 
   useEffect(() => {
     if (status !== 'connected') return;
 
     const heartbeatCheckId = window.setInterval(() => {
       const now = Date.now();
+      const mode = inventoryModeRef.current;
+      if (mode === 'batchSaving') {
+        return;
+      }
+
+      if (mode === 'batch') {
+        const lastHeartbeat = lastBatteryHeartbeatRef.current;
+        if (!lastHeartbeat || now - lastHeartbeat > BATCH_BATTERY_TIMEOUT_MS) {
+          markDeviceOffline('Device offline: no batch battery update for 30s');
+        }
+        return;
+      }
+
       if (inventoryActiveRef.current) {
         const lastActivity = lastDeviceActivityRef.current;
         if (!lastActivity || now - lastActivity > SCAN_ACTIVITY_TIMEOUT_MS) {

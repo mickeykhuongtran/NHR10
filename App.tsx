@@ -169,8 +169,18 @@ const handleDataReceived = useCallback((data: any) => {
   }, [clearBatchSaving, connection.status, locate.resetLocateState, scan.resetScanSession]);
 
   useEffect(() => {
-    connection.setInventoryActive(connection.status === 'connected' && (scan.isScanning || locate.isLocating));
-  }, [connection.setInventoryActive, connection.status, locate.isLocating, scan.isScanning]);
+    const connectionMode = isBatchSaving
+      ? 'batchSaving'
+      : scan.activeScanType === 'batch'
+        ? 'batch'
+        : scan.activeScanType === 'interactive'
+          ? 'interactive'
+          : locate.isLocating
+            ? 'locate'
+            : 'idle';
+
+    connection.setInventoryActive(connection.status === 'connected' && connectionMode !== 'idle', connectionMode);
+  }, [connection.setInventoryActive, connection.status, isBatchSaving, locate.isLocating, scan.activeScanType]);
 
   // --- Handlers ---
 

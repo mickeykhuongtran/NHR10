@@ -38,6 +38,8 @@ const normalizeProfileValue = (value: unknown, fallback = 53) => {
 };
 type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
 type SelectOption = { label: string; value: number };
+type SettingsAction = () => void | Promise<void>;
+type SettingsActionSource = 'early' | 'click';
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
@@ -52,6 +54,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const [popupContent, setPopupContent] = useState('Hello!');
   const [popupTime, setPopupTime] = useState(2000);
   const [popupBeep, setPopupBeep] = useState(true);
+  const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
+  const settingsActionAtRef = useRef(0);
+  const activeActionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setPower(settings.power);
@@ -81,6 +86,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     setAppend(settings.scanParams.append || 0);
   }, [settings.scanParams?.append, settings.scanParams?.dwell, settings.scanParams?.interval]);
 
+  useEffect(() => () => {
+    if (activeActionTimerRef.current !== null) {
+      window.clearTimeout(activeActionTimerRef.current);
+    }
+  }, []);
+
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
   const handleGetProfile = () => bleService.getProfile();
@@ -96,6 +107,57 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     width: 'calc((100% - 0.5rem) / 2)',
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
   };
+
+  const markActionPressed = (actionKey: string) => {
+    setActiveActionKey(actionKey);
+    if (activeActionTimerRef.current !== null) {
+      window.clearTimeout(activeActionTimerRef.current);
+    }
+    activeActionTimerRef.current = window.setTimeout(() => {
+      setActiveActionKey(null);
+      activeActionTimerRef.current = null;
+    }, 280);
+  };
+
+  const runSettingsAction = (actionKey: string, action: SettingsAction, source: SettingsActionSource) => {
+    const now = Date.now();
+    if (source === 'click' && now - settingsActionAtRef.current < 650) {
+      return;
+    }
+    if (source === 'early' && now - settingsActionAtRef.current < 250) {
+      return;
+    }
+
+    settingsActionAtRef.current = now;
+    markActionPressed(actionKey);
+
+    try {
+      const result = action();
+      if (result && typeof result.catch === 'function') {
+        void result.catch((error) => console.error('Settings action failed', error));
+      }
+    } catch (error) {
+      console.error('Settings action failed', error);
+    }
+  };
+
+  const getSettingsActionHandlers = (actionKey: string, action: SettingsAction) => ({
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === 'mouse') return;
+      event.preventDefault();
+      event.stopPropagation();
+      runSettingsAction(actionKey, action, 'early');
+    },
+    onTouchStart: (event: React.TouchEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      runSettingsAction(actionKey, action, 'early');
+    },
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      runSettingsAction(actionKey, action, 'click');
+    },
+  });
 
   const Card = ({
     children,
@@ -119,10 +181,28 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     </section>
   );
 
-  const ActionRow = ({ onGet, onSet }: { onGet: () => void; onSet: () => void }) => (
+  const ActionRow = ({ id, onGet, onSet }: { id: string; onGet: SettingsAction; onSet: SettingsAction }) => (
     <div className="mt-3 grid grid-cols-2 gap-2">
-      <Button onClick={onGet} variant="secondary" size="sm" className={COMPACT_BUTTON_CLASS}>GET</Button>
-      <Button onClick={onSet} variant="primary" size="sm" className={COMPACT_BUTTON_CLASS}>SET</Button>
+      <Button
+        {...getSettingsActionHandlers(`${id}:get`, onGet)}
+        variant="secondary"
+        size="sm"
+        className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
+          activeActionKey === `${id}:get` ? 'bg-white/90 text-[#166B78] ring-2 ring-[#52c7da]/38' : ''
+        }`}
+      >
+        GET
+      </Button>
+      <Button
+        {...getSettingsActionHandlers(`${id}:set`, onSet)}
+        variant="primary"
+        size="sm"
+        className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
+          activeActionKey === `${id}:set` ? 'ring-2 ring-[#166B78]/24 brightness-105' : ''
+        }`}
+      >
+        SET
+      </Button>
     </div>
   );
 
@@ -234,7 +314,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
               +
             </button>
           </div>
-          <ActionRow onGet={handleGetPower} onSet={handleSetPower} />
+          <ActionRow id="power" onGet={handleGetPower} onSet={handleSetPower} />
         </Card>
 
         <Card
@@ -248,7 +328,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
             options={PROFILE_SELECT_OPTIONS}
             onChange={setProfile}
           />
-          <ActionRow onGet={handleGetProfile} onSet={handleSetProfile} />
+          <ActionRow id="profile" onGet={handleGetProfile} onSet={handleSetProfile} />
         </Card>
 
         <Card
@@ -276,7 +356,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
               />
             </div>
           </div>
-          <ActionRow onGet={handleGetQSession} onSet={handleSetQSession} />
+          <ActionRow id="q-session" onGet={handleGetQSession} onSet={handleSetQSession} />
         </Card>
 
         <Card title="Tag Focus" subtitle="Singulation assist">
@@ -302,7 +382,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
               </button>
             ))}
           </div>
-          <ActionRow onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
+          <ActionRow id="tag-focus" onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
         </Card>
 
         <Card
@@ -339,7 +419,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
               />
             </div>
           </div>
-          <ActionRow onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
+          <ActionRow id="query-params" onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
         </Card>
 
         <Card title="Device Popup" subtitle="Display test" className="xl:col-span-2">
