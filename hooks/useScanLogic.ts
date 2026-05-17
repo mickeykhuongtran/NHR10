@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { bleService } from '../services/bleService';
 import { ScanStats, Tag, ScanType, TagVisibility } from '../types';
 
 const TAG_ACTIVE_MS = 1200;
 const DEFAULT_TAG_REMOVE_MS = 3000;
 const TAG_RENDER_INTERVAL_MS = 500;
-const STOP_COMMAND_RETRY_DELAY_MS = 150;
+const STOP_COMMAND_REPEAT_COUNT = 3;
+const STOP_COMMAND_REPEAT_DELAY_MS = 120;
 
 const DEFAULT_SCAN_STATS: ScanStats = {
   visibleTags: 0,
@@ -57,6 +59,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   const isScanningRef = useRef(false);
   const activeScanTypeRef = useRef<ScanType>(null);
   const stopRequestedRef = useRef(true);
+  const stopInFlightRef = useRef(false);
 
   const resetScanData = useCallback(() => {
     const now = Date.now();
@@ -277,6 +280,10 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   const stopScan = async () => {
     const stopType = activeScanTypeRef.current ?? activeScanType;
     const wasScanning = isScanningRef.current || isScanning || stopType !== null;
+    if (stopInFlightRef.current) {
+      return;
+    }
+
     if (!wasScanning) {
       stopRequestedRef.current = true;
       isScanningRef.current = false;
@@ -285,12 +292,38 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
     }
 
     const stoppedAt = Date.now();
+    stopInFlightRef.current = true;
     stopRequestedRef.current = true;
     isScanningRef.current = false;
     activeScanTypeRef.current = null;
-    setIsScanning(false);
-    setActiveScanType(null);
-    setScanStoppedAt(stoppedAt);
+    bleService.suspendLiveTags();
+    flushSync(() => {
+      setIsScanning(false);
+      setActiveScanType(null);
+      setScanStoppedAt(stoppedAt);
+    });
+
+    const sendInteractiveStopBurst = async () => {
+      let success = false;
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt < STOP_COMMAND_REPEAT_COUNT; attempt++) {
+        try {
+          await bleService.stopScan();
+          success = true;
+        } catch (error: any) {
+          lastError = error;
+        }
+
+        if (attempt < STOP_COMMAND_REPEAT_COUNT - 1) {
+          await wait(STOP_COMMAND_REPEAT_DELAY_MS);
+        }
+      }
+
+      if (!success) {
+        throw lastError ?? new Error('Stop command failed');
+      }
+    };
 
     const sendStopCommand = async () => {
       if (stopType === 'batch') {
@@ -298,20 +331,16 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
         return;
       }
 
-      await bleService.stopScan();
+      await sendInteractiveStopBurst();
     };
 
     try {
       await sendStopCommand();
       addLog(stopType === 'batch' ? 'Batch Mode Stopped' : 'Scanning Stopped', 'info');
-    } catch (firstError: any) {
-      try {
-        await wait(STOP_COMMAND_RETRY_DELAY_MS);
-        await sendStopCommand();
-        addLog(stopType === 'batch' ? 'Batch Mode Stopped after retry' : 'Scanning Stopped after retry', 'info');
-      } catch (secondError: any) {
-        addLog(`Stop command failed: ${secondError?.message ?? firstError?.message ?? 'Unknown error'}`, 'error');
-      }
+    } catch (error: any) {
+      addLog(`Stop command failed: ${error?.message ?? 'Unknown error'}`, 'error');
+    } finally {
+      stopInFlightRef.current = false;
     }
   };
 

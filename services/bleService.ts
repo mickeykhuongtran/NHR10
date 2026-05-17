@@ -35,11 +35,13 @@ const LIVE_TAGS_MAGIC_0 = 0x4E; // 'N'
 const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
 const LIVE_TAGS_VERSION = 1;
 const LIVE_TAGS_TYPE = 1;
+const LIVE_TAGS_DELIVERY_INTERVAL_MS = 100;
 
+type LiveTagsItem = [string, number, number, number];
 type LiveTagsPayload = {
   cmd: 'live_tags';
   seq: number;
-  d: Array<[string, number, number, number]>;
+  d: LiveTagsItem[];
 };
 
 // Callbacks
@@ -84,6 +86,10 @@ class BLEService {
   // Command Queue to prevent GATT collisions
   private commandQueue: Promise<void> = Promise.resolve();
   private acceptLiveTags = false;
+  private liveTagsFlushTimer: number | null = null;
+  private liveTagsLastFlushAt = 0;
+  private pendingLiveTagsSeq = 0;
+  private pendingLiveTags: Map<string, LiveTagsItem> = new Map();
 
   // Bound handler for file notifications
   private boundFileHandler = this.handleFileNotification.bind(this);
@@ -185,6 +191,7 @@ class BLEService {
     this.resetFileState();
     this.commandQueue = Promise.resolve();
     this.acceptLiveTags = false;
+    this.clearPendingLiveTags();
     this.device = null;
     this.server = null;
     this.service = null;
@@ -200,6 +207,65 @@ class BLEService {
     this.fileReceivedSize = 0;
     this.fileExpectedChunks = 0;
     this.fileSeqEndian = null;
+  }
+
+  suspendLiveTags() {
+    this.acceptLiveTags = false;
+    this.clearPendingLiveTags();
+  }
+
+  private clearPendingLiveTags() {
+    if (this.liveTagsFlushTimer !== null) {
+      window.clearTimeout(this.liveTagsFlushTimer);
+      this.liveTagsFlushTimer = null;
+    }
+
+    this.pendingLiveTags.clear();
+    this.pendingLiveTagsSeq = 0;
+  }
+
+  private enqueueLiveTags(data: LiveTagsPayload) {
+    if (!this.acceptLiveTags) return;
+
+    data.d.forEach(([epc, rssi, countDelta, totalCount]) => {
+      const existing = this.pendingLiveTags.get(epc);
+      const mergedDelta = (existing?.[2] ?? 0) + countDelta;
+      this.pendingLiveTags.set(epc, [epc, rssi, mergedDelta, totalCount]);
+    });
+
+    this.pendingLiveTagsSeq = data.seq;
+    this.scheduleLiveTagsFlush();
+  }
+
+  private scheduleLiveTagsFlush() {
+    if (this.liveTagsFlushTimer !== null) return;
+
+    const elapsedMs = Date.now() - this.liveTagsLastFlushAt;
+    const delayMs = Math.max(0, LIVE_TAGS_DELIVERY_INTERVAL_MS - elapsedMs);
+    this.liveTagsFlushTimer = window.setTimeout(() => {
+      this.liveTagsFlushTimer = null;
+      this.flushLiveTags();
+    }, delayMs);
+  }
+
+  private flushLiveTags() {
+    if (!this.acceptLiveTags || this.pendingLiveTags.size === 0) {
+      this.clearPendingLiveTags();
+      return;
+    }
+
+    const payload: LiveTagsPayload = {
+      cmd: 'live_tags',
+      seq: this.pendingLiveTagsSeq,
+      d: Array.from(this.pendingLiveTags.values()),
+    };
+
+    this.pendingLiveTags.clear();
+    this.pendingLiveTagsSeq = 0;
+    this.liveTagsLastFlushAt = Date.now();
+    if (this.onDataReceived) {
+      this.onDataReceived(payload);
+    }
   }
 
   private handleCmdNotification(event: Event) {
@@ -224,8 +290,8 @@ class BLEService {
       }
 
       const data = this.parseBinaryLiveTags(view);
-      if (data && this.onDataReceived) {
-        this.onDataReceived(data);
+      if (data) {
+        this.enqueueLiveTags(data);
       }
       return;
     }
@@ -241,7 +307,18 @@ class BLEService {
     try {
       const data = JSON.parse(value);
 
-      if ((data.cmd === 'live_tag' || data.cmd === 'live_tags') && !this.acceptLiveTags) {
+      if (data.cmd === 'live_tags') {
+        if (!this.acceptLiveTags) {
+          return;
+        }
+
+        if (Array.isArray(data.d)) {
+          this.enqueueLiveTags(data);
+        }
+        return;
+      }
+
+      if (data.cmd === 'live_tag' && !this.acceptLiveTags) {
         return;
       }
 
@@ -541,26 +618,27 @@ class BLEService {
   async saveTagFocus(enable: boolean) { return this.sendCommand({ cmd: 'STF', val: enable ? 1 : 0 }); }
   
   async startScan() {
+    this.clearPendingLiveTags();
     this.acceptLiveTags = true;
     try {
       await this.sendCommand({ cmd: 'S' });
     } catch (error) {
-      this.acceptLiveTags = false;
+      this.suspendLiveTags();
       throw error;
     }
   }
 
   async stopScan() {
-    this.acceptLiveTags = false;
+    this.suspendLiveTags();
     return this.sendCommand({ cmd: 'X' });
   }
   
   async startBatch() {
-    this.acceptLiveTags = false;
+    this.suspendLiveTags();
     return this.sendCommand({ cmd: 'SB' });
   }
   async stopBatch() {
-    this.acceptLiveTags = false;
+    this.suspendLiveTags();
     return this.sendCommand({ cmd: 'XB' });
   }
 

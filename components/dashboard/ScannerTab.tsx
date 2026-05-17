@@ -11,7 +11,7 @@ const DESKTOP_TABLE_MIN_WIDTH = 1000;
 const TABLET_TABLE_MIN_WIDTH = 740;
 const DESKTOP_TAG_TABLE_COLUMNS = '52px minmax(20rem, 1fr) 156px 92px 116px 116px 132px';
 const TABLET_TAG_TABLE_COLUMNS = '44px minmax(13rem, 1fr) 120px 78px 108px 118px';
-const MOBILE_TAG_ITEM_SIZE = 204;
+const MOBILE_TAG_ITEM_SIZE = 236;
 const TIMER_UPDATE_INTERVAL_MS = 100;
 const PRESET_OPTIONS = [
   {
@@ -202,6 +202,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   const [viewportMode, setViewportMode] = useState<ViewportMode>(() => getViewportMode());
   const [staleRemoveUnitsInput, setStaleRemoveUnitsInput] = useState(() => formatStaleRemoveUnits(staleRemoveMs));
   const [isEditingStaleRemoveMs, setIsEditingStaleRemoveMs] = useState(false);
+  const primaryScanActionAtRef = useRef(0);
 
   const excludedSet = useMemo(() => new Set(excludedEpcs), [excludedEpcs]);
   const tagsByEpc = useMemo(() => new Map(tags.map((tag) => [tag.epc, tag])), [tags]);
@@ -351,6 +352,72 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
     setActivePreset(mode);
     onApplyPreset(mode);
   };
+
+  const runPrimaryScanAction = useCallback((source: 'early' | 'click') => {
+    const now = Date.now();
+    if (source === 'click' && now - primaryScanActionAtRef.current < 650) {
+      return;
+    }
+
+    if (source === 'early') {
+      if (now - primaryScanActionAtRef.current < 250) {
+        return;
+      }
+      primaryScanActionAtRef.current = now;
+    }
+
+    if (activeScanType === 'interactive') {
+      onStopScan();
+      return;
+    }
+
+    onStartScan();
+  }, [activeScanType, onStartScan, onStopScan]);
+
+  const renderScanActionButtons = (isMobileSticky = false) => (
+    <>
+      <Button
+        variant={activeScanType === 'interactive' ? 'danger' : 'success'}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse') return;
+          event.preventDefault();
+          runPrimaryScanAction('early');
+        }}
+        onTouchStart={(event) => {
+          event.preventDefault();
+          runPrimaryScanAction('early');
+        }}
+        onClick={() => runPrimaryScanAction('click')}
+        disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
+        className={`${isMobileSticky ? 'h-11 min-w-0 flex-1 text-xs' : 'h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none'} ${
+          activeScanType !== 'interactive' ? 'bg-[#52c7da] border-[#52c7da] hover:bg-[#42b9cc]' : ''
+        }`}
+      >
+        {isBatchSaving && activeScanType !== 'interactive' ? (
+          <><Database size={14} /> SAVING...</>
+        ) : activeScanType === 'interactive' ? (
+          <><Square size={14} fill="currentColor" /> STOP SCAN</>
+        ) : (
+          <><Play size={14} fill="currentColor" /> START SCAN</>
+        )}
+      </Button>
+
+      <Button
+        variant={activeScanType === 'batch' ? 'danger' : 'secondary'}
+        onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
+        disabled={activeScanType === 'interactive' || isBatchSaving}
+        className={`${isMobileSticky ? 'h-11 min-w-0 flex-1 text-xs' : 'h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none'}`}
+      >
+        {isBatchSaving ? (
+          <>SAVING {Math.round(batchSaveInfo.progress)}%</>
+        ) : activeScanType === 'batch' ? (
+          <>STOP BATCH</>
+        ) : (
+          <>BATCH MODE</>
+        )}
+      </Button>
+    </>
+  );
 
   useEffect(() => {
     if (listRef.current && scannerPanel === 'live') {
@@ -545,7 +612,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
 
   const MobileMetric = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="min-h-[40px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
+    <div className="min-h-[42px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
       <p className="text-[9px] font-bold uppercase tracking-wide text-[#7A8E92]">{label}</p>
       <div className="mt-0.5 font-mono text-xs font-bold text-[#166B78]">{children}</div>
     </div>
@@ -560,7 +627,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
     isCopied: boolean;
     onCopy: (epc: string) => void;
   }) => (
-    <div className="group/epc flex min-w-0 items-start gap-2 rounded-md bg-[#F3FCFE]/62 px-2 py-1.5 ring-1 ring-[#52c7da]/18" title={epc}>
+    <div className="group/epc flex min-h-[50px] min-w-0 items-center gap-2 rounded-md bg-[#F3FCFE]/62 px-2 py-1.5 ring-1 ring-[#52c7da]/18" title={epc}>
       <span className="min-w-0 flex-1 select-text break-all font-mono text-[12px] font-bold leading-4 tracking-wide text-[#0C4F5B]">
         {epc}
       </span>
@@ -614,11 +681,11 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           ...style,
           boxSizing: 'border-box',
           opacity: rowOpacity,
-          padding: '6px 9px',
+          padding: '8px 9px',
         }}
       >
-        <div className="soft-table-row box-border flex h-full flex-col gap-2 rounded-lg border border-[#BFEFF6] bg-white/72 p-3 text-xs shadow-[0_8px_24px_rgba(18,78,90,0.08)]">
-          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-[#DDECEF]/80 pb-2">
+        <div className="soft-table-row box-border flex h-full min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-[#BFEFF6] bg-white/72 p-3 text-xs shadow-[0_8px_24px_rgba(18,78,90,0.08)]">
+          <div className="flex min-h-[30px] min-w-0 items-center justify-between gap-2 border-b border-[#DDECEF]/80 pb-2">
             <span className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md bg-[#E7F9FC] font-mono text-[11px] font-bold text-[#166B78] ring-1 ring-[#52c7da]/25">
               {index + 1}
             </span>
@@ -715,38 +782,18 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5 lg:overflow-hidden">
+      <div className="sticky top-0 z-40 -mx-2 -mt-2 px-2 pt-2 sm:hidden">
+        <div className="soft-glass flex gap-2 rounded-lg border border-[#52c7da]/28 bg-white/82 p-2 shadow-[0_12px_34px_rgba(18,78,90,0.16)] backdrop-blur-2xl">
+          {renderScanActionButtons(true)}
+        </div>
+      </div>
+
       <section className="soft-glass rounded-lg">
         <div className="flex flex-col gap-3 border-b border-[#DDECEF]/75 p-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant={activeScanType === 'interactive' ? 'danger' : 'success'}
-              onClick={activeScanType === 'interactive' ? onStopScan : onStartScan}
-              disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
-              className={`h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none ${activeScanType !== 'interactive' ? 'bg-[#52c7da] border-[#52c7da] hover:bg-[#42b9cc]' : ''}`}
-            >
-              {isBatchSaving && activeScanType !== 'interactive' ? (
-                <><Database size={14} /> SAVING...</>
-              ) : activeScanType === 'interactive' ? (
-                <><Square size={14} fill="currentColor" /> STOP SCAN</>
-              ) : (
-                <><Play size={14} fill="currentColor" /> START SCAN</>
-              )}
-            </Button>
-
-            <Button
-              variant={activeScanType === 'batch' ? 'danger' : 'secondary'}
-              onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
-              disabled={activeScanType === 'interactive' || isBatchSaving}
-              className="h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none"
-            >
-              {isBatchSaving ? (
-                <>SAVING {Math.round(batchSaveInfo.progress)}%</>
-              ) : activeScanType === 'batch' ? (
-                <>STOP BATCH</>
-              ) : (
-                <>BATCH MODE</>
-              )}
-            </Button>
+            <div className="hidden flex-wrap items-center gap-2 sm:flex">
+              {renderScanActionButtons()}
+            </div>
 
             <div className="soft-surface relative ml-0 inline-grid min-w-[218px] flex-1 grid-cols-3 rounded-md border border-[#52c7da]/20 p-1 sm:flex-none lg:ml-2">
               <span
