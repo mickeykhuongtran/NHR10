@@ -722,7 +722,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   );
 
   const StatBlock = ({ label, value, tone = 'dark' }: { label: string; value: React.ReactNode; tone?: 'dark' | 'accent' | 'muted' }) => (
-    <div className="border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
+    <div className="min-w-0 overflow-hidden border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6E7F83]">{label}</p>
       <p className={`mt-1 text-xl font-semibold sm:text-2xl ${tone === 'accent' ? 'text-[#166B78]' : tone === 'muted' ? 'text-[#6E7F83]' : 'text-[#1D1D1F]'}`}>
         {value}
@@ -730,29 +730,54 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
     </div>
   );
 
-  const RatePulse = ({ values }: { values: number[] }) => {
+  const RateSparkline = ({ values }: { values: number[] }) => {
     const normalizedValues = values.length > 0 ? values : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     const maxValue = Math.max(1, ...normalizedValues);
+    const chartValues = normalizedValues.slice(-18);
+    const width = 100;
+    const height = 34;
+    const lastIndex = Math.max(1, chartValues.length - 1);
+    const points = chartValues.map((value, index) => {
+      const x = (index / lastIndex) * width;
+      const y = height - Math.max(4, (value / maxValue) * (height - 6));
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(' ');
+    const areaPoints = `0,${height} ${points} ${width},${height}`;
 
     return (
-      <div className="flex h-9 items-end gap-1" aria-hidden="true">
-        {normalizedValues.slice(-14).map((value, index) => (
-          <span
-            key={`${index}-${value}`}
-            className="w-1.5 rounded-full bg-[#52c7da]/70 shadow-[0_0_10px_rgba(82,199,218,0.18)]"
-            style={{ height: `${Math.max(5, (value / maxValue) * 34)}px`, opacity: 0.28 + (value / maxValue) * 0.72 }}
+      <div className="h-9 min-w-0 flex-1 overflow-hidden" aria-hidden="true">
+        <svg className="block h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="rateSparklineFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#52c7da" stopOpacity="0.26" />
+              <stop offset="100%" stopColor="#52c7da" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          <polyline
+            points={areaPoints}
+            fill="url(#rateSparklineFill)"
+            stroke="none"
           />
-        ))}
+          <polyline
+            points={points}
+            fill="none"
+            stroke="#52c7da"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="3"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
       </div>
     );
   };
 
   const RateStatBlock = () => (
-    <div className="border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
+    <div className="min-w-0 overflow-hidden border-r border-b border-[#DDECEF]/75 px-3 py-2 last:border-r-0 sm:px-4 sm:py-3 xl:border-b-0">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6E7F83]">Tag Count/s</p>
-      <div className="mt-1 flex items-end justify-between gap-4">
-        <p className="text-2xl font-semibold text-[#166B78] sm:text-3xl">{formatRate(stats.readsPerSecond)}</p>
-        <RatePulse values={rateHistory} />
+      <div className="mt-1 flex min-w-0 items-end gap-2">
+        <p className="shrink-0 text-2xl font-semibold leading-none text-[#166B78] sm:text-3xl">{formatRate(stats.readsPerSecond)}</p>
+        <RateSparkline values={rateHistory} />
       </div>
     </div>
   );
@@ -781,14 +806,14 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5 lg:overflow-hidden">
+    <div className="flex h-full w-full max-w-full touch-pan-y flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-contain overscroll-x-none bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5 lg:overflow-hidden">
       <div className="sticky top-0 z-40 -mx-2 -mt-2 px-2 pt-2 sm:hidden">
         <div className="soft-glass flex gap-2 rounded-lg border border-[#52c7da]/28 bg-white/82 p-2 shadow-[0_12px_34px_rgba(18,78,90,0.16)] backdrop-blur-2xl">
           {renderScanActionButtons(true)}
         </div>
       </div>
 
-      <section className="soft-glass rounded-lg">
+      <section className="soft-glass min-w-0 rounded-lg">
         <div className="flex flex-col gap-3 border-b border-[#DDECEF]/75 p-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <div className="hidden flex-wrap items-center gap-2 sm:flex">
@@ -851,7 +876,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
+        <div className="grid min-w-0 grid-cols-2 overflow-hidden sm:grid-cols-3 xl:grid-cols-5">
           <StatBlock label="Visible EPC" value={displayedTags.length} />
           <StatBlock label="Total Reads" value={stats.totalReads} tone="accent" />
           <RateStatBlock />
@@ -860,7 +885,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
         </div>
       </section>
 
-      <section className="soft-glass flex min-h-[26rem] flex-none flex-col overflow-hidden rounded-lg lg:min-h-0 lg:flex-1">
+      <section className="soft-glass flex min-h-[26rem] min-w-0 flex-none flex-col overflow-hidden rounded-lg lg:min-h-0 lg:flex-1">
         <div className="flex flex-col gap-2 border-b border-[#DDECEF]/75 bg-white/36 px-2 py-2 backdrop-blur-xl sm:px-3 md:flex-row md:items-center md:justify-between">
           <div className="soft-surface relative inline-grid w-full grid-cols-2 rounded-md border border-[#52c7da]/20 p-1 sm:w-auto sm:min-w-[216px]">
             <span
