@@ -117,7 +117,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     boxShadow: '0 30px 78px rgba(18,78,90,0.22), 0 0 0 1px rgba(82,199,218,0.18) inset, 0 1px 0 rgba(255,255,255,0.98) inset',
     backdropFilter: 'blur(36px) saturate(210%)',
     WebkitBackdropFilter: 'blur(36px) saturate(210%)',
-    transform: 'translateY(-2px)',
   };
 
   const markActionPressed = (actionKey: string) => {
@@ -188,7 +187,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
 
     return (
       <section
-        className={`soft-glass rounded-lg p-3 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
+        className={`soft-glass rounded-lg p-3 transition-[background,box-shadow,filter,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
         style={isActive ? activeCardStyle : undefined}
       >
         <div className="mb-3 flex items-start justify-between gap-3">
