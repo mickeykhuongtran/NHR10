@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { bleService } from '../services/bleService';
-import { ConnectionStatus, Settings, LogEntry } from '../types';
+import { ConnectionStatus, Settings, LogEntry, SettingsSyncRevision } from '../types';
 
 const IDLE_BATTERY_POLL_INTERVAL_MS = 2000;
 const IDLE_BATTERY_TIMEOUT_MS = 6000;
@@ -26,6 +26,23 @@ const parseLinkProfile = (data: any): number | null => (
 );
 
 type InventoryMode = 'idle' | 'interactive' | 'batch' | 'batchSaving' | 'locate';
+type SettingsSyncKey = keyof SettingsSyncRevision;
+
+const createSettingsSyncRevision = (): SettingsSyncRevision => ({
+  power: 0,
+  linkProfile: 0,
+  qSession: 0,
+  queryParams: 0,
+  tagFocus: 0,
+});
+
+const bumpSettingsSyncRevision = (settings: Settings, key: SettingsSyncKey): SettingsSyncRevision => {
+  const current = settings.syncRevision ?? createSettingsSyncRevision();
+  return {
+    ...current,
+    [key]: current[key] + 1,
+  };
+};
 
 export const useRFIDConnection = () => {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
@@ -51,7 +68,8 @@ export const useRFIDConnection = () => {
     temperature: 0,
     battery: 0,
     batteryState: 'normal',
-    deviceInfo: ''
+    deviceInfo: '',
+    syncRevision: createSettingsSyncRevision(),
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -128,7 +146,17 @@ export const useRFIDConnection = () => {
             setSettings(s => ({ ...s, deviceInfo: deviceName }));
         }
     }
-    if (data.cmd === 'GRI') setSettings(s => ({ ...s, version: data.ver, power: data.pwr }));
+    if (data.cmd === 'GRI') {
+        const power = parseFiniteNumber(data.pwr);
+        setSettings(s => ({
+            ...s,
+            version: data.ver ?? s.version,
+            ...(power !== null ? {
+                power,
+                syncRevision: bumpSettingsSyncRevision(s, 'power'),
+            } : {}),
+        }));
+    }
     if (data.cmd === 'GT') setSettings(s => ({ ...s, temperature: data.val }));
     if (data.cmd === 'GB') {
         markBatteryHeartbeat();
@@ -139,14 +167,19 @@ export const useRFIDConnection = () => {
             setSettings(s => ({ ...s, battery: data.val }));
         }
     }
-    if (data.cmd === 'GP') setSettings(s => ({ ...s, power: data.val }));
+    if (data.cmd === 'GP' || data.cmd === 'SP') {
+        const power = parseFiniteNumber(data.val ?? data.power ?? data.pwr);
+        if (power !== null) {
+            setSettings(s => ({ ...s, power, syncRevision: bumpSettingsSyncRevision(s, 'power') }));
+        }
+    }
     if (data.cmd === 'GLP' || data.cmd === 'SLP') {
         const profile = parseLinkProfile(data);
         if (profile !== null) {
-            setSettings(s => ({ ...s, linkProfile: profile }));
+            setSettings(s => ({ ...s, linkProfile: profile, syncRevision: bumpSettingsSyncRevision(s, 'linkProfile') }));
         }
     }
-    if (data.cmd === 'GQS') {
+    if (data.cmd === 'GQS' || data.cmd === 'SQS') {
         let q = data.q;
         let s = data.session;
         if (q === undefined && typeof data.val === 'string') {
@@ -157,13 +190,13 @@ export const useRFIDConnection = () => {
             }
         }
         if (q !== undefined && s !== undefined) {
-            setSettings(prev => ({ ...prev, qValue: q, session: s }));
+            setSettings(prev => ({ ...prev, qValue: q, session: s, syncRevision: bumpSettingsSyncRevision(prev, 'qSession') }));
         }
     }
-    if (data.cmd === 'GQP') {
+    if (data.cmd === 'GQP' || data.cmd === 'SQP') {
         let interval = data.interval;
         let dwell = data.dwell;
-        let append = data.times; // Firmware sends 'times' for append value
+        let append = data.times ?? data.append; // Firmware sends 'times' for append value
         
         if (interval === undefined && typeof data.val === 'string') {
             const parts = data.val.split(',');
@@ -187,13 +220,14 @@ export const useRFIDConnection = () => {
                     dwell: uiDwell, 
                     count: uiAppend, // Legacy
                     append: uiAppend 
-                } 
+                },
+                syncRevision: bumpSettingsSyncRevision(prev, 'queryParams'),
             }));
         }
     }
-    if (data.cmd === 'GTF') {
+    if (data.cmd === 'GTF' || data.cmd === 'TF' || data.cmd === 'STF') {
         const val = parseInt(String(data.val));
-        setSettings(prev => ({ ...prev, tagFocus: val === 1 }));
+        setSettings(prev => ({ ...prev, tagFocus: val === 1, syncRevision: bumpSettingsSyncRevision(prev, 'tagFocus') }));
     }
   }, [markBatteryHeartbeat, markDeviceActivity]);
 

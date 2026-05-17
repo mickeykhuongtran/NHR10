@@ -204,6 +204,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   const [staleRemoveUnitsInput, setStaleRemoveUnitsInput] = useState(() => formatStaleRemoveUnits(staleRemoveMs));
   const [isEditingStaleRemoveMs, setIsEditingStaleRemoveMs] = useState(false);
   const primaryScanActionAtRef = useRef(0);
+  const batchScanActionAtRef = useRef(0);
   const scannerPanelActionAtRef = useRef(0);
 
   const excludedSet = useMemo(() => new Set(excludedEpcs), [excludedEpcs]);
@@ -376,6 +377,27 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
     onStartScan();
   }, [activeScanType, onStartScan, onStopScan]);
 
+  const runBatchScanAction = useCallback((source: 'early' | 'click') => {
+    const now = Date.now();
+    if (source === 'click' && now - batchScanActionAtRef.current < 650) {
+      return;
+    }
+
+    if (source === 'early') {
+      if (now - batchScanActionAtRef.current < 250) {
+        return;
+      }
+      batchScanActionAtRef.current = now;
+    }
+
+    if (activeScanType === 'batch') {
+      onStopBatch();
+      return;
+    }
+
+    onStartBatch();
+  }, [activeScanType, onStartBatch, onStopBatch]);
+
   const switchScannerPanel = useCallback((panel: 'live' | 'excluded', source: 'early' | 'click') => {
     const now = Date.now();
     if (source === 'click' && now - scannerPanelActionAtRef.current < 650) {
@@ -437,7 +459,16 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
 
       <Button
         variant={activeScanType === 'batch' ? 'danger' : 'secondary'}
-        onClick={activeScanType === 'batch' ? onStopBatch : onStartBatch}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse') return;
+          event.preventDefault();
+          runBatchScanAction('early');
+        }}
+        onTouchStart={(event) => {
+          event.preventDefault();
+          runBatchScanAction('early');
+        }}
+        onClick={() => runBatchScanAction('click')}
         disabled={activeScanType === 'interactive' || isBatchSaving}
         className={`${isMobileSticky ? 'h-11 min-w-0 flex-1 text-xs' : 'h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none'}`}
       >

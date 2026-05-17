@@ -57,26 +57,31 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const settingsActionAtRef = useRef(0);
   const activeActionTimerRef = useRef<number | null>(null);
+  const powerSyncRevision = settings.syncRevision?.power ?? 0;
+  const profileSyncRevision = settings.syncRevision?.linkProfile ?? 0;
+  const qSessionSyncRevision = settings.syncRevision?.qSession ?? 0;
+  const queryParamsSyncRevision = settings.syncRevision?.queryParams ?? 0;
+  const tagFocusSyncRevision = settings.syncRevision?.tagFocus ?? 0;
 
   useEffect(() => {
     setPower(settings.power);
-  }, [settings.power]);
+  }, [settings.power, powerSyncRevision]);
 
   useEffect(() => {
     setProfile(normalizeProfileValue(settings.linkProfile));
-  }, [settings.linkProfile]);
+  }, [settings.linkProfile, profileSyncRevision]);
 
   useEffect(() => {
     setQValue(settings.qValue);
-  }, [settings.qValue]);
+  }, [settings.qValue, qSessionSyncRevision]);
 
   useEffect(() => {
     setSession(settings.session);
-  }, [settings.session]);
+  }, [settings.session, qSessionSyncRevision]);
 
   useEffect(() => {
     setTagFocus(settings.tagFocus);
-  }, [settings.tagFocus]);
+  }, [settings.tagFocus, tagFocusSyncRevision]);
 
   useEffect(() => {
     if (!settings.scanParams) return;
@@ -84,7 +89,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     setQueryInterval(settings.scanParams.interval);
     setDwell(settings.scanParams.dwell);
     setAppend(settings.scanParams.append || 0);
-  }, [settings.scanParams?.append, settings.scanParams?.dwell, settings.scanParams?.interval]);
+  }, [queryParamsSyncRevision, settings.scanParams?.append, settings.scanParams?.dwell, settings.scanParams?.interval]);
 
   useEffect(() => () => {
     if (activeActionTimerRef.current !== null) {

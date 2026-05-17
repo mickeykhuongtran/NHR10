@@ -28,6 +28,14 @@ export interface Tag {
   visibility?: TagVisibility;
 }
 
+export interface SettingsSyncRevision {
+  power: number;
+  linkProfile: number;
+  qSession: number;
+  queryParams: number;
+  tagFocus: number;
+}
+
 export interface Settings {
   power: number;
   buzzer: boolean;
@@ -47,6 +55,7 @@ export interface Settings {
   battery: number;
   batteryState?: string;
   deviceInfo: string;
+  syncRevision?: SettingsSyncRevision;
 }
 
 export interface LogEntry {

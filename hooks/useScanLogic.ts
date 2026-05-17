@@ -325,9 +325,31 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       }
     };
 
+    const sendBatchStopBurst = async () => {
+      let success = false;
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt < STOP_COMMAND_REPEAT_COUNT; attempt++) {
+        try {
+          await bleService.stopBatch();
+          success = true;
+        } catch (error: any) {
+          lastError = error;
+        }
+
+        if (attempt < STOP_COMMAND_REPEAT_COUNT - 1) {
+          await wait(STOP_COMMAND_REPEAT_DELAY_MS);
+        }
+      }
+
+      if (!success) {
+        throw lastError ?? new Error('Stop batch command failed');
+      }
+    };
+
     const sendStopCommand = async () => {
       if (stopType === 'batch') {
-        await bleService.stopBatch();
+        await sendBatchStopBurst();
         return;
       }
 
