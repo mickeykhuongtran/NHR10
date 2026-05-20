@@ -8,6 +8,7 @@ const DEFAULT_TAG_REMOVE_MS = 3000;
 const TAG_RENDER_INTERVAL_MS = 500;
 const STOP_COMMAND_REPEAT_COUNT = 3;
 const STOP_COMMAND_REPEAT_DELAY_MS = 120;
+const SCAN_CONTROL_COMMANDS = new Set(['S', 'X', 'SB', 'XB']);
 
 const DEFAULT_SCAN_STATS: ScanStats = {
   visibleTags: 0,
@@ -37,6 +38,23 @@ const getTagFreshness = (lastSeen: number, now: number, fadeWindowMs: number): n
 };
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const getControlStatusText = (data: any): string => (
+  String(data.status ?? data.state ?? data.val ?? '').trim().toLowerCase()
+);
+
+const isSuccessfulControlResponse = (data: any): boolean => {
+  if (data.err !== undefined && data.err !== 0) return false;
+  const status = getControlStatusText(data);
+  if (!status) return true;
+  return ['ok', 'started', 'stopped', 'saved', 'done', 'idle'].includes(status);
+};
+
+const isControlErrorResponse = (data: any): boolean => {
+  if (data.err !== undefined && data.err !== 0) return true;
+  const status = getControlStatusText(data);
+  return status.includes('fail') || status.includes('error') || status.includes('denied');
+};
 
 export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void) => {
   const [isScanning, setIsScanning] = useState(false);
@@ -84,6 +102,47 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
     setScanStartedAt(null);
     setScanStoppedAt(null);
   }, [resetScanData]);
+
+  const applyDeviceScanStarted = useCallback((mode: Exclude<ScanType, null>) => {
+    const shouldStartNewSession = !isScanningRef.current || activeScanTypeRef.current !== mode;
+    const startedAt = Date.now();
+
+    if (shouldStartNewSession) {
+      resetScanData();
+    }
+
+    stopRequestedRef.current = false;
+    stopInFlightRef.current = false;
+    isScanningRef.current = true;
+    activeScanTypeRef.current = mode;
+
+    if (mode === 'interactive') {
+      bleService.resumeLiveTags();
+    } else {
+      bleService.suspendLiveTags();
+    }
+
+    setIsScanning(true);
+    setActiveScanType(mode);
+    setScanStartedAt((current) => shouldStartNewSession ? startedAt : current ?? startedAt);
+    setScanStoppedAt(null);
+  }, [resetScanData]);
+
+  const applyDeviceScanStopped = useCallback(() => {
+    const stoppedAt = Date.now();
+
+    stopRequestedRef.current = true;
+    stopInFlightRef.current = false;
+    isScanningRef.current = false;
+    activeScanTypeRef.current = null;
+    bleService.suspendLiveTags();
+
+    flushSync(() => {
+      setIsScanning(false);
+      setActiveScanType(null);
+      setScanStoppedAt(stoppedAt);
+    });
+  }, []);
 
   const setStaleRemoveMs = useCallback((value: number) => {
     setStaleRemoveMsState(normalizeRemoveMs(value));
@@ -194,6 +253,27 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
   }, [requestPublish]);
 
   const handleDataReceived = useCallback((data: any) => {
+    if (SCAN_CONTROL_COMMANDS.has(data.cmd)) {
+      if (isControlErrorResponse(data)) {
+        addLog(`${data.cmd} failed: ${data.err ?? data.status ?? data.state ?? 'Unknown error'}`, 'error');
+        return;
+      }
+
+      if (!isSuccessfulControlResponse(data)) {
+        return;
+      }
+
+      if (data.cmd === 'S') {
+        applyDeviceScanStarted('interactive');
+      } else if (data.cmd === 'SB') {
+        applyDeviceScanStarted('batch');
+      } else if (data.cmd === 'X' || data.cmd === 'XB') {
+        applyDeviceScanStopped();
+      }
+
+      return;
+    }
+
     if (stopRequestedRef.current || !isScanningRef.current) {
       return;
     }
@@ -249,7 +329,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
     if (hasChanges) {
       requestPublish(true);
     }
-  }, [requestPublish]);
+  }, [addLog, applyDeviceScanStarted, applyDeviceScanStopped, requestPublish]);
 
   const startScan = async () => {
     try {
@@ -260,14 +340,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       setScanStartedAt(null);
       setScanStoppedAt(null);
       await bleService.startScan();
-      const startedAt = Date.now();
-      stopRequestedRef.current = false;
-      isScanningRef.current = true;
-      activeScanTypeRef.current = 'interactive';
-      setIsScanning(true);
-      setActiveScanType('interactive');
-      setScanStartedAt(startedAt);
-      setScanStoppedAt(null);
+      applyDeviceScanStarted('interactive');
       addLog('Scanning Started', 'info');
     } catch (e: any) {
       stopRequestedRef.current = true;
@@ -293,15 +366,9 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
 
     const stoppedAt = Date.now();
     stopInFlightRef.current = true;
-    stopRequestedRef.current = true;
-    isScanningRef.current = false;
-    activeScanTypeRef.current = null;
-    bleService.suspendLiveTags();
-    flushSync(() => {
-      setIsScanning(false);
-      setActiveScanType(null);
-      setScanStoppedAt(stoppedAt);
-    });
+    applyDeviceScanStopped();
+    stopInFlightRef.current = true;
+    setScanStoppedAt(stoppedAt);
 
     const sendInteractiveStopBurst = async () => {
       let success = false;
@@ -375,14 +442,7 @@ export const useScanLogic = (addLog: (msg: string, type: 'info' | 'error' | 'rx'
       setScanStartedAt(null);
       setScanStoppedAt(null);
       await bleService.startBatch();
-      const startedAt = Date.now();
-      stopRequestedRef.current = false;
-      isScanningRef.current = true;
-      activeScanTypeRef.current = 'batch';
-      setIsScanning(true);
-      setActiveScanType('batch');
-      setScanStartedAt(startedAt);
-      setScanStoppedAt(null);
+      applyDeviceScanStarted('batch');
       addLog('Batch Mode Started', 'info');
     } catch (e: any) {
       stopRequestedRef.current = true;

@@ -231,6 +231,11 @@ class BLEService {
     this.clearPendingLiveTags();
   }
 
+  resumeLiveTags() {
+    this.clearPendingLiveTags();
+    this.acceptLiveTags = true;
+  }
+
   private clearPendingLiveTags() {
     if (this.liveTagsFlushTimer !== null) {
       window.clearTimeout(this.liveTagsFlushTimer);
