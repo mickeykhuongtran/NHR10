@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Radio, Crosshair, ScanBarcode, SlidersHorizontal, SquareTerminal, Database } from 'lucide-react';
+import { Radio, Crosshair, ScanBarcode, SlidersHorizontal, SquareTerminal, Database, Code2 } from 'lucide-react';
 import { TopBar } from './TopBar';
 import { ScannerTab } from './ScannerTab';
 import { LocateTab } from './LocateTab';
 import { OperationsTab } from './OperationsTab';
+import { DevelopTab } from './DevelopTab';
 import { SettingsTab } from './SettingsTab';
 import { DebugTab } from './DebugTab';
 import { HistoryTab } from './HistoryTab';
@@ -49,6 +50,7 @@ interface DashboardLayoutProps {
   historyData: any[];
   isBatchSaving: boolean;
   batchSaveInfo: BatchSaveInfo;
+  onDownloadLogs: () => void;
   onClearLogs: () => void;
   isFileTransferring: boolean;
   transferProgress: number;
@@ -67,7 +69,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
     { id: 2, label: 'Locate', icon: Crosshair },
     { id: 3, label: 'Encode', icon: ScanBarcode },
     { id: 6, label: 'Storage', icon: Database },
-    { id: 4, label: 'Settings', icon: SlidersHorizontal },
+    { id: 4, label: 'Setting', icon: SlidersHorizontal },
+    { id: 7, label: 'Develop', icon: Code2 },
     { id: 5, label: 'Debug', icon: SquareTerminal },
   ];
 
@@ -184,6 +187,19 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               onSaveSetting={props.onSaveSetting}
               onSaveConfig={props.onSaveConfig}
               onShowPopup={props.onShowPopup}
+            />
+          )}
+
+          {activeTab === 7 && (
+            <DevelopTab
+              activeScanType={props.activeScanType}
+              isBatchSaving={props.isBatchSaving}
+              isScanning={props.isScanning}
+              onClearTags={props.onClearTags}
+              onStartScan={props.onStartScan}
+              onStopScan={props.onStopScan}
+              status={props.status}
+              tags={props.tags}
             />
           )}
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { PenTool, Database, ArrowRight, Save, Lock } from 'lucide-react';
+import { PenTool, Database, Lock, ScanBarcode } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { PageHeader } from './PageHeader';
 
 interface OperationsTabProps {
   onWriteEpc: (targetEpc: string, newEpc: string, password?: string) => void;
@@ -33,17 +34,35 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
   };
 
   return (
-    <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto bg-slate-950">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+      <PageHeader
+        icon={ScanBarcode}
+        title="ENCODE"
+        subtitle="Write EPC or memory-bank data with a compact, step-oriented workflow."
+        meta={
+          writeStatus !== 'idle' ? (
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              writeStatus === 'success'
+                ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]'
+                : writeStatus === 'error'
+                  ? 'border-[#FF3B30]/35 bg-[#FF3B30]/10 text-[#C32118]'
+                  : 'border-[#52c7da]/35 bg-[#E7F9FC] text-[#166B78]'
+            }`}>
+              {writeStatus}
+            </span>
+          ) : null
+        }
+      />
       
       {/* Quick Write EPC */}
-      <div className="bg-slate-900 rounded-sm border border-slate-800 p-4 space-y-4">
+      <section className="soft-glass rounded-lg p-4 space-y-4">
         <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-          <div className="bg-cyan-950/30 p-1.5 rounded-sm text-cyan-500 border border-cyan-900/50">
+          <div className="bg-cyan-950/30 p-1.5 rounded-md text-cyan-500 border border-cyan-900/50">
             <PenTool size={16} />
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-200 tracking-tight">QUICK WRITE EPC</h2>
-            <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Update EPC Memory Bank (Bank 1)</p>
+            <p className="text-[10px] text-slate-600 font-semibold uppercase tracking-wide">Update EPC memory bank (Bank 1)</p>
           </div>
         </div>
 
@@ -82,17 +101,17 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
         >
           {writeStatus === 'pending' ? 'WRITING...' : 'WRITE NEW EPC'}
         </Button>
-      </div>
+      </section>
 
       {/* Advanced Write Data */}
-      <div className="bg-slate-900 rounded-sm border border-slate-800 p-4 space-y-4">
+      <section className="soft-glass rounded-lg p-4 space-y-4">
         <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-          <div className="bg-purple-950/30 p-1.5 rounded-sm text-purple-400 border border-purple-900/50">
+          <div className="bg-purple-950/30 p-1.5 rounded-md text-purple-400 border border-purple-900/50">
             <Database size={16} />
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-200 tracking-tight">ADVANCED MEMORY WRITE</h2>
-            <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Write to Reserved, TID, or User Banks</p>
+            <p className="text-[10px] text-slate-600 font-semibold uppercase tracking-wide">Write to Reserved, TID, or User banks</p>
           </div>
         </div>
 
@@ -168,11 +187,11 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
         >
           {writeStatus === 'pending' ? 'WRITING...' : 'EXECUTE WRITE OPERATION'}
         </Button>
-      </div>
+      </section>
 
       {/* Status Message */}
       {writeMessage && (
-        <div className={`p-3 rounded-sm border ${writeStatus === 'success' ? 'bg-emerald-950/30 border-emerald-900/50 text-emerald-500' : 'bg-red-950/30 border-red-900/50 text-red-500'}`}>
+        <div className={`p-3 rounded-lg border ${writeStatus === 'success' ? 'bg-emerald-950/30 border-emerald-900/50 text-emerald-500' : 'bg-red-950/30 border-red-900/50 text-red-500'}`}>
           <p className="font-bold text-[10px] uppercase tracking-wide">{writeStatus === 'success' ? 'SUCCESS' : 'ERROR'}</p>
           <p className="font-mono text-[10px] mt-0.5">{writeMessage}</p>
         </div>

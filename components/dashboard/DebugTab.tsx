@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Download, Terminal, Trash2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { LogEntry } from '../../types';
+import { PageHeader } from './PageHeader';
 
 interface DebugTabProps {
   logs: LogEntry[];
@@ -19,21 +20,18 @@ export const DebugTab: React.FC<DebugTabProps> = ({ logs, onDownloadHistory, onC
   }, [logs]);
 
   return (
-    <div className="flex flex-col h-full p-4 gap-3 bg-slate-950 text-slate-300 font-mono">
-      
-      {/* Header Actions */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-900 p-1.5 rounded-sm text-cyan-500">
-            <Terminal size={16} />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-slate-200 tracking-tight">SYSTEM DIAGNOSTICS</h2>
-            <p className="text-[10px] text-slate-600 uppercase tracking-wider">Real-time BLE Communication Log</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col gap-3 bg-transparent p-2 text-slate-300 sm:p-3 md:p-5">
+      <PageHeader
+        icon={Terminal}
+        title="DEBUG"
+        subtitle="Real-time BLE communication log and diagnostic export."
+        meta={
+          <span className="rounded-full border border-[#DDECEF] bg-white/58 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#6E7F83]">
+            {logs.length} events
+          </span>
+        }
+        actions={
+          <>
           <Button 
             variant="secondary" 
             onClick={onDownloadHistory} 
@@ -49,8 +47,9 @@ export const DebugTab: React.FC<DebugTabProps> = ({ logs, onDownloadHistory, onC
           >
             <Trash2 size={14} /> CLEAR
           </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Console Output */}
       <div className="flex-1 bg-black rounded-sm border border-slate-800 overflow-hidden flex flex-col shadow-inner">

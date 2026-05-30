@@ -10,11 +10,12 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-window": "^1.8.10",
-    "react-virtualized-auto-sizer": "^1.0.24"
+    "react-virtualized-auto-sizer": "^1.0.24",
+    "react-window": "^1.8.10"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

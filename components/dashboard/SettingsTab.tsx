@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
+import { PageHeader } from './PageHeader';
 
 interface SettingsTabProps {
   settings: SettingsType;
@@ -40,6 +41,133 @@ type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'appen
 type SelectOption = { label: string; value: number };
 type SettingsAction = () => void | Promise<void>;
 type SettingsActionSource = 'early' | 'click';
+const ACTIVE_CARD_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(218,247,252,0.88))',
+  boxShadow: '0 30px 78px rgba(18,78,90,0.22), 0 0 0 1px rgba(82,199,218,0.18) inset, 0 1px 0 rgba(255,255,255,0.98) inset',
+  backdropFilter: 'blur(36px) saturate(210%)',
+  WebkitBackdropFilter: 'blur(36px) saturate(210%)',
+};
+
+const SettingsCard = ({
+  actionId,
+  activeActionKey,
+  children,
+  className = '',
+  subtitle,
+  title,
+}: {
+  actionId?: string;
+  activeActionKey?: string | null;
+  children: React.ReactNode;
+  className?: string;
+  subtitle?: string;
+  title: string;
+}) => {
+  const isActive = actionId ? activeActionKey?.startsWith(`${actionId}:`) : false;
+
+  return (
+    <section
+      className={`soft-glass rounded-lg p-3 transition-[background,box-shadow,filter,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
+      style={isActive ? ACTIVE_CARD_STYLE : undefined}
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
+          {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+};
+
+const FieldLabel = ({ children }: { children: React.ReactNode }) => (
+  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#6E7F83]">{children}</label>
+);
+
+const SelectField = ({
+  id,
+  onChange,
+  onOpenChange,
+  openSelect,
+  options,
+  value,
+}: {
+  id: SelectFieldId;
+  onChange: (value: number) => void;
+  onOpenChange: React.Dispatch<React.SetStateAction<SelectFieldId | null>>;
+  openSelect: SelectFieldId | null;
+  options: SelectOption[];
+  value: number;
+}) => {
+  const selectRef = useRef<HTMLDivElement>(null);
+  const isOpen = openSelect === id;
+  const selectedValue = normalizeProfileValue(value, value);
+  const selectedOption = options.find((option) => option.value === selectedValue);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!selectRef.current?.contains(event.target as Node)) {
+        onOpenChange(null);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isOpen, onOpenChange]);
+
+  return (
+    <div ref={selectRef} className="relative">
+      <button
+        type="button"
+        className={`${FIELD_CLASS} flex items-center justify-between text-left`}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        onClick={() => onOpenChange((current) => current === id ? null : id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            onOpenChange(null);
+          }
+        }}
+      >
+        <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
+        <ChevronDown
+          size={16}
+          strokeWidth={2.2}
+          className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && (
+        <div
+          role="listbox"
+          className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 touch-pan-y overscroll-contain overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
+        >
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={selectedValue === option.value}
+              className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
+                selectedValue === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
+              }`}
+              onClick={() => {
+                onChange(option.value);
+                onOpenChange(null);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
@@ -112,12 +240,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     width: 'calc((100% - 0.5rem) / 2)',
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
   };
-  const activeCardStyle: React.CSSProperties = {
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(218,247,252,0.88))',
-    boxShadow: '0 30px 78px rgba(18,78,90,0.22), 0 0 0 1px rgba(82,199,218,0.18) inset, 0 1px 0 rgba(255,255,255,0.98) inset',
-    backdropFilter: 'blur(36px) saturate(210%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(210%)',
-  };
 
   const markActionPressed = (actionKey: string) => {
     setActiveActionKey(actionKey);
@@ -170,37 +292,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     },
   });
 
-  const Card = ({
-    actionId,
-    children,
-    className = '',
-    subtitle,
-    title,
-  }: {
-    actionId?: string;
-    children: React.ReactNode;
-    className?: string;
-    subtitle?: string;
-    title: string;
-  }) => {
-    const isActive = actionId ? activeActionKey?.startsWith(`${actionId}:`) : false;
-
-    return (
-      <section
-        className={`soft-glass rounded-lg p-3 transition-[background,box-shadow,filter,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
-        style={isActive ? activeCardStyle : undefined}
-      >
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
-            {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
-          </div>
-        </div>
-        {children}
-      </section>
-    );
-  };
-
   const ActionRow = ({ id, onGet, onSet }: { id: string; onGet: SettingsAction; onSet: SettingsAction }) => (
     <div className="mt-3 grid grid-cols-2 gap-2">
       <Button
@@ -226,94 +317,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     </div>
   );
 
-  const FieldLabel = ({ children }: { children: React.ReactNode }) => (
-    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#6E7F83]">{children}</label>
-  );
-
-  const SelectField = ({
-    id,
-    onChange,
-    options,
-    value,
-  }: {
-    id: SelectFieldId;
-    onChange: (value: number) => void;
-    options: SelectOption[];
-    value: number;
-  }) => {
-    const selectRef = useRef<HTMLDivElement>(null);
-    const isOpen = openSelect === id;
-    const selectedValue = normalizeProfileValue(value, value);
-    const selectedOption = options.find((option) => option.value === selectedValue);
-
-    useEffect(() => {
-      if (!isOpen) return;
-
-      const handlePointerDown = (event: PointerEvent) => {
-        if (!selectRef.current?.contains(event.target as Node)) {
-          setOpenSelect(null);
-        }
-      };
-
-      window.addEventListener('pointerdown', handlePointerDown);
-      return () => window.removeEventListener('pointerdown', handlePointerDown);
-    }, [isOpen]);
-
-    return (
-      <div ref={selectRef} className="relative">
-        <button
-          type="button"
-          className={`${FIELD_CLASS} flex items-center justify-between text-left`}
-          aria-expanded={isOpen}
-          aria-haspopup="listbox"
-          onClick={() => setOpenSelect((current) => current === id ? null : id)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              setOpenSelect(null);
-            }
-          }}
-        >
-          <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
-          <ChevronDown
-            size={16}
-            strokeWidth={2.2}
-            className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
-            aria-hidden="true"
-          />
-        </button>
-
-        {isOpen && (
-          <div
-            role="listbox"
-            className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
-          >
-            {options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selectedValue === option.value}
-                className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
-                  selectedValue === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
-                }`}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpenSelect(null);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
-    <div className="h-full overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+      <PageHeader
+        icon={SlidersHorizontal}
+        title="SETTING"
+        subtitle="Tune RF power, Gen2 behavior, inventory timing, and device utilities."
+      />
+
       <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card actionId="power" title="Power" subtitle="RF output">
+        <SettingsCard actionId="power" activeActionKey={activeActionKey} title="Power" subtitle="RF output">
           <div className="flex items-center justify-center gap-3">
             <button
               type="button"
@@ -335,10 +348,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
             </button>
           </div>
           <ActionRow id="power" onGet={handleGetPower} onSet={handleSetPower} />
-        </Card>
+        </SettingsCard>
 
-        <Card
+        <SettingsCard
           actionId="profile"
+          activeActionKey={activeActionKey}
           title="RF Link Profile"
           subtitle="Backscatter link"
           className={`relative overflow-visible ${openSelect === 'profile' ? 'z-[120]' : 'z-10'}`}
@@ -348,12 +362,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
             value={profile}
             options={PROFILE_SELECT_OPTIONS}
             onChange={setProfile}
+            openSelect={openSelect}
+            onOpenChange={setOpenSelect}
           />
           <ActionRow id="profile" onGet={handleGetProfile} onSet={handleSetProfile} />
-        </Card>
+        </SettingsCard>
 
-        <Card
+        <SettingsCard
           actionId="q-session"
+          activeActionKey={activeActionKey}
           title="EPC Gen2"
           subtitle="Q and session"
           className={`relative overflow-visible ${openSelect === 'q' || openSelect === 'session' ? 'z-[120]' : 'z-10'}`}
@@ -366,6 +383,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 value={qValue}
                 options={Q_SELECT_OPTIONS}
                 onChange={setQValue}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -375,13 +394,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 value={session}
                 options={SESSION_SELECT_OPTIONS}
                 onChange={setSession}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
               />
             </div>
           </div>
           <ActionRow id="q-session" onGet={handleGetQSession} onSet={handleSetQSession} />
-        </Card>
+        </SettingsCard>
 
-        <Card actionId="tag-focus" title="Tag Focus" subtitle="Singulation assist">
+        <SettingsCard actionId="tag-focus" activeActionKey={activeActionKey} title="Tag Focus" subtitle="Singulation assist">
           <div className="soft-surface relative grid grid-cols-2 rounded-md border border-[#52c7da]/24 p-1">
             <span
               aria-hidden="true"
@@ -405,10 +426,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
             ))}
           </div>
           <ActionRow id="tag-focus" onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
-        </Card>
+        </SettingsCard>
 
-        <Card
+        <SettingsCard
           actionId="query-params"
+          activeActionKey={activeActionKey}
           title="Query Parameter"
           subtitle="Inventory timing"
           className={`relative overflow-visible xl:col-span-2 ${openSelect === 'interval' || openSelect === 'dwell' || openSelect === 'append' ? 'z-[120]' : 'z-10'}`}
@@ -421,6 +443,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 value={queryInterval}
                 options={INTERVAL_SELECT_OPTIONS}
                 onChange={setQueryInterval}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -430,6 +454,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 value={clampNumber(dwell, 2, 255)}
                 options={DWELL_SELECT_OPTIONS}
                 onChange={setDwell}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -439,13 +465,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
                 value={append}
                 options={APPEND_SELECT_OPTIONS}
                 onChange={setAppend}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
               />
             </div>
           </div>
           <ActionRow id="query-params" onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
-        </Card>
+        </SettingsCard>
 
-        <Card title="Device Popup" subtitle="Display test" className="xl:col-span-2">
+        <SettingsCard title="Device Popup" subtitle="Display test" className="xl:col-span-2">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px_104px]">
             <div>
               <FieldLabel>Content</FieldLabel>
@@ -492,7 +520,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
           >
             TEST POPUP
           </Button>
-        </Card>
+        </SettingsCard>
 
         <section className="soft-glass rounded-lg p-3 md:col-span-2 xl:col-span-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

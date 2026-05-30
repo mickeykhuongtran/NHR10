@@ -771,10 +771,13 @@ class BLEService {
     // These will be queued automatically by sendCommand
     await this.sendCommand({ cmd: 'DI' });
     await this.sendCommand({ cmd: 'GRI' });
+    await this.sendCommand({ cmd: 'GB' });
     await this.sendCommand({ cmd: 'GT' });
     await this.sendCommand({ cmd: 'GP' });
     await this.sendCommand({ cmd: 'GLP' });
     await this.sendCommand({ cmd: 'GQS' });
+    await this.sendCommand({ cmd: 'GQP' });
+    await this.sendCommand({ cmd: 'GTF' });
   }
   
   async requestFileTransfer(): Promise<void> {

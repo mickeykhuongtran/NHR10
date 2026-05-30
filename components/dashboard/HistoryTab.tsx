@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Download, FileText, Database, RefreshCw, Trash2, FileSpreadsheet, Share2, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BatchHistoryRecord, BatchSaveInfo, FileTransferStatus } from '../../types';
+import { PageHeader } from './PageHeader';
 
 interface HistoryTabProps {
   onFetchHistory: () => void;
@@ -127,24 +128,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950">
-      
-      {/* Header */}
-      <div className="p-4 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/50">
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-900 p-2 rounded-full border border-slate-800 text-cyan-500">
-            <Database size={20} />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-200 tracking-tight">BATCH HISTORY</h2>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">
-              {isWaitingForDevice ? `SAVING ON DEVICE ${saveProgress}%` : hasData ? `${historyData.length} UNIQUE EPCs` : 'NO DATA LOADED'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-           {hasData && (
+    <div className="flex h-full flex-col gap-3 bg-transparent p-2 sm:p-3 md:p-5">
+      <PageHeader
+        icon={Database}
+        title="STORAGE"
+        subtitle={isWaitingForDevice ? `Saving on device ${saveProgress}%` : hasData ? `${historyData.length} unique EPCs loaded` : 'Fetch batch EPC list from device memory.'}
+        actions={
+          hasData && (
             <>
               <Button 
                 variant="outline" 
@@ -193,25 +183,26 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 <Share2 size={16} className="mr-2" /> SHARE
               </Button>
             </>
-          )}
-        </div>
-        {shareNotice && (
-          <div className="w-full rounded-lg border border-[#D2D2D7] bg-white px-3 py-2 text-xs text-[#424245] shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span>{shareNotice}</span>
-              <button
-                onClick={() => setShareNotice(null)}
-                className="text-[#007AFF] font-medium"
-              >
-                OK
-              </button>
-            </div>
+          )
+        }
+      />
+
+      {shareNotice && (
+        <div className="rounded-lg border border-[#D2D2D7] bg-white px-3 py-2 text-xs text-[#424245] shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span>{shareNotice}</span>
+            <button
+              onClick={() => setShareNotice(null)}
+              className="text-[#007AFF] font-medium"
+            >
+              OK
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Main Content */}
-      <div className="flex-1 overflow-hidden p-4 flex flex-col items-center justify-center">
+      <div className="flex-1 overflow-hidden flex flex-col items-center justify-center">
         
         {!hasData && !isFileTransferring && (
           <div className="text-center space-y-6 max-w-sm">
