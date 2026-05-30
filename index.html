@@ -179,6 +179,41 @@
         opacity: 0.68;
       }
 
+      .develop-camera-shell {
+        height: clamp(17rem, 48dvh, 23rem);
+      }
+
+      .develop-scan-window {
+        aspect-ratio: 1 / 1;
+        width: clamp(11.5rem, 62vw, 15rem);
+        max-width: calc(100% - 2rem);
+        max-height: calc(100% - 2rem);
+      }
+
+      @supports (height: 100svh) {
+        .develop-camera-shell {
+          height: clamp(17rem, 48svh, 23rem);
+        }
+      }
+
+      @media (min-width: 640px) {
+        .develop-camera-shell {
+          height: clamp(18rem, 46dvh, 26rem);
+        }
+
+        .develop-scan-window {
+          width: clamp(13rem, 34vw, 16.25rem);
+        }
+      }
+
+      @media (min-width: 1280px) {
+        .develop-camera-shell {
+          flex: 1 1 auto;
+          height: auto;
+          min-height: 18rem;
+        }
+      }
+
       @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
         .soft-glass,
         .soft-glass-strong,

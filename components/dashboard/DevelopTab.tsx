@@ -97,13 +97,16 @@ export const DevelopTab: React.FC<DevelopTabProps> = ({
       });
       readerRef.current = reader;
 
+      const prefersPortraitCamera = window.matchMedia('(pointer: coarse), (max-width: 640px)').matches;
+
       controlsRef.current = await reader.decodeFromConstraints(
         {
           audio: false,
           video: {
             facingMode: { ideal: 'environment' },
-            height: { ideal: 720 },
-            width: { ideal: 1280 },
+            aspectRatio: { ideal: prefersPortraitCamera ? 3 / 4 : 16 / 9 },
+            height: { ideal: prefersPortraitCamera ? 1280 : 720 },
+            width: { ideal: prefersPortraitCamera ? 720 : 1280 },
           },
         },
         videoRef.current,
@@ -157,7 +160,7 @@ export const DevelopTab: React.FC<DevelopTabProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+    <div className="flex h-full max-w-full touch-pan-y flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-3 md:p-5">
       <PageHeader
         icon={Barcode}
         title="DEVELOP"
@@ -169,20 +172,20 @@ export const DevelopTab: React.FC<DevelopTabProps> = ({
         }
       />
 
-      <div className="grid min-h-[38rem] flex-1 grid-cols-1 gap-3 xl:min-h-0 xl:grid-cols-[minmax(320px,0.92fr)_minmax(420px,1.08fr)]">
-        <section className="soft-glass flex min-h-[34rem] flex-col overflow-hidden rounded-lg">
+      <div className="grid flex-none grid-cols-1 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.92fr)_minmax(420px,1.08fr)]">
+        <section className="soft-glass flex min-h-0 flex-col overflow-hidden rounded-lg xl:min-h-[34rem]">
           <div className="flex flex-col gap-3 border-b border-[#DDECEF]/75 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h2 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">QR / Barcode</h2>
               <p className="mt-0.5 text-[11px] font-medium text-[#6E6E73]">Use rear camera when available.</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 sm:justify-end">
               {codeState === 'starting' || codeState === 'scanning' ? (
-                <Button variant="danger" size="sm" className="h-9 min-w-[112px]" onClick={stopCodeScan}>
+                <Button variant="danger" size="sm" className="h-9 w-full min-w-[112px] sm:w-auto" onClick={stopCodeScan}>
                   <Square size={14} fill="currentColor" /> STOP
                 </Button>
               ) : (
-                <Button variant="primary" size="sm" className="h-9 min-w-[112px]" onClick={startCodeScan}>
+                <Button variant="primary" size="sm" className="h-9 w-full min-w-[112px] sm:w-auto" onClick={startCodeScan}>
                   <Camera size={14} /> SCAN CODE
                 </Button>
               )}
@@ -190,15 +193,15 @@ export const DevelopTab: React.FC<DevelopTabProps> = ({
           </div>
 
           <div className="flex flex-1 flex-col gap-3 p-3">
-            <div className="relative min-h-[18rem] flex-1 overflow-hidden rounded-lg border border-[#DDECEF] bg-[#1C1C1E]">
+            <div className="develop-camera-shell relative overflow-hidden rounded-lg border border-[#DDECEF] bg-[#1C1C1E]">
               <video
                 ref={videoRef}
-                className={`h-full w-full object-cover ${codeState === 'starting' || codeState === 'scanning' ? 'opacity-100' : 'opacity-35'}`}
+                className={`absolute inset-0 h-full w-full object-cover object-center ${codeState === 'starting' || codeState === 'scanning' ? 'opacity-100' : 'opacity-35'}`}
                 muted
                 playsInline
               />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-                <div className="aspect-square w-full max-w-[260px] rounded-lg border-2 border-white/78 shadow-[0_0_0_999px_rgba(0,0,0,0.34)]" />
+              <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                <div className="develop-scan-window rounded-lg border-2 border-white/82 shadow-[0_0_0_999px_rgba(0,0,0,0.28)]" />
               </div>
               <div className="absolute left-3 top-3 rounded-full border border-white/20 bg-black/42 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
                 {codeState === 'starting' ? 'Starting camera' : codeState === 'scanning' ? 'Scanning' : codeState === 'found' ? 'Code found' : 'Camera idle'}
