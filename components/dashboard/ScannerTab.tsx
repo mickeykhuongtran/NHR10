@@ -168,6 +168,10 @@ interface ScannerTabProps {
   onApplyPreset: (mode: ScanPresetMode) => void;
   isBatchSaving: boolean;
   batchSaveInfo: BatchSaveInfo;
+  excludedEpcs: string[];
+  excludedSnapshots: Record<string, Tag>;
+  setExcludedEpcs: React.Dispatch<React.SetStateAction<string[]>>;
+  setExcludedSnapshots: React.Dispatch<React.SetStateAction<Record<string, Tag>>>;
 }
 
 export const ScannerTab: React.FC<ScannerTabProps> = ({
@@ -188,15 +192,17 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
   stats,
   onApplyPreset,
   isBatchSaving,
-  batchSaveInfo
+  batchSaveInfo,
+  excludedEpcs,
+  excludedSnapshots,
+  setExcludedEpcs,
+  setExcludedSnapshots
 }) => {
   const listRef = useRef<List>(null);
   const staleRemoveInputRef = useRef<HTMLInputElement>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const [activePreset, setActivePreset] = useState<ScanPresetMode>('standard');
   const [scannerPanel, setScannerPanel] = useState<'live' | 'excluded'>('live');
-  const [excludedEpcs, setExcludedEpcs] = useState<string[]>([]);
-  const [excludedSnapshots, setExcludedSnapshots] = useState<Record<string, Tag>>({});
   const [copiedEpc, setCopiedEpc] = useState<string | null>(null);
   const [runtimeNow, setRuntimeNow] = useState(Date.now());
   const [rateHistory, setRateHistory] = useState<number[]>([]);
@@ -222,6 +228,14 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
       visibility: 'stale' as const,
     })
   ), [excludedEpcs, excludedSnapshots, tagsByEpc]);
+  const excludedOnlineCount = useMemo(() => (
+    excludedEpcs.reduce((count, epc) => {
+      const liveTag = tagsByEpc.get(epc);
+      return liveTag && (liveTag.visibility === 'active' || liveTag.visibility === undefined)
+        ? count + 1
+        : count;
+    }, 0)
+  ), [excludedEpcs, tagsByEpc]);
 
   const displayedRssiAverage = useMemo(() => {
     const values = displayedTags
@@ -945,7 +959,17 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           <StatBlock label="Total Reads" value={stats.totalReads} tone="accent" />
           <RateStatBlock />
           <StatBlock label="RSSI Avg" value={formatRssi(displayedRssiAverage)} />
-          <StatBlock label="Excluded" value={excludedEpcs.length} tone="muted" />
+          <StatBlock
+            label="Excluded"
+            value={(
+              <span className="inline-flex items-baseline gap-1.5 font-mono">
+                <span className="text-[#C32118]">{excludedEpcs.length}</span>
+                <span className="text-[#A7B8BC]">|</span>
+                <span className="text-[#1B9B55]">{excludedOnlineCount}</span>
+              </span>
+            )}
+            tone="muted"
+          />
         </div>
       </section>
 

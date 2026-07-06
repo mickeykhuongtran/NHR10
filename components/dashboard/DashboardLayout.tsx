@@ -63,6 +63,8 @@ interface DashboardLayoutProps {
 export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   const [activeTab, setActiveTab] = useState<number>(1);
   const [locateEpc, setLocateEpc] = useState<string>('');
+  const [scannerExcludedEpcs, setScannerExcludedEpcs] = useState<string[]>([]);
+  const [scannerExcludedSnapshots, setScannerExcludedSnapshots] = useState<Record<string, Tag>>({});
 
   const tabs = [
     { id: 1, label: 'Scanner', icon: Radio },
@@ -140,6 +142,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               onApplyPreset={props.onApplyPreset}
               isBatchSaving={props.isBatchSaving}
               batchSaveInfo={props.batchSaveInfo}
+              excludedEpcs={scannerExcludedEpcs}
+              excludedSnapshots={scannerExcludedSnapshots}
+              setExcludedEpcs={setScannerExcludedEpcs}
+              setExcludedSnapshots={setScannerExcludedSnapshots}
             />
           )}
           

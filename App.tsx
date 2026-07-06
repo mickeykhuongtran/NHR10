@@ -139,6 +139,19 @@ const handleDataReceived = useCallback((data: any) => {
         clearBatchSaving();
       }
     }
+
+    if (data.cmd === 'SF') {
+      if (data.status === 'ok') {
+        connection.addLog(`Region Band set: ${data.val ?? data.mode ?? 'updated'}`, 'info');
+        void bleService.getRegion().catch((error) => connection.addLog(`Region sync failed: ${error.message}`, 'error'));
+      } else if (data.status === 'err') {
+        connection.addLog(`Region Band set failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
+      }
+    }
+
+    if (data.cmd === 'GF' && data.status === 'err') {
+      connection.addLog(`Region Band read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
+    }
   }, [connection, scan, locate, markBatchSaving, clearBatchSaving]);
 
   useEffect(() => {

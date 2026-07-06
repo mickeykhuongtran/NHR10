@@ -661,6 +661,7 @@ class BLEService {
 
   async getQueryParam() { return this.sendCommand({ cmd: 'GQP' }); }
   async getTagFocus() { return this.sendCommand({ cmd: 'GTF' }); }
+  async getRegion() { return this.sendCommand({ cmd: 'GF' }); }
 
   async setPower(dbm: number) { return this.sendCommand({ cmd: 'SP', val: dbm }); }
   
@@ -685,6 +686,21 @@ class BLEService {
     //   dwell:    raw count (e.g. 150, module interprets as 150*100ms = 15s)
     //   append:   direct value (0-255)
     return this.sendCommand({ cmd: 'SQP', val: `${intervalMs},${dwellRaw},${append}` });
+  }
+
+  async setRegion(region: string, save = true) {
+    return this.sendCommand({ cmd: 'SF', val: region, save });
+  }
+
+  async setCustomRegion(startKHz: number, count: number, space125KHz: number, save = true) {
+    return this.sendCommand({
+      cmd: 'SF',
+      mode: 'custom',
+      start_khz: startKHz,
+      count,
+      space_125khz: space125KHz,
+      save,
+    });
   }
 
   async setTagFocus(enable: boolean) { return this.sendCommand({ cmd: 'TF', val: enable ? 1 : 0 }); }
@@ -778,6 +794,7 @@ class BLEService {
     await this.sendCommand({ cmd: 'GQS' });
     await this.sendCommand({ cmd: 'GQP' });
     await this.sendCommand({ cmd: 'GTF' });
+    await this.sendCommand({ cmd: 'GF' });
   }
   
   async requestFileTransfer(): Promise<void> {

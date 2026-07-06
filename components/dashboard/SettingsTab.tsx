@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { Settings as SettingsType } from '../../types';
+import { RegionBandSelection, Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
 import { PageHeader } from './PageHeader';
 
@@ -24,6 +24,14 @@ const INTERVAL_OPTIONS = [0, 10, 20, 30, 40, 50, 60];
 const APPEND_OPTIONS = [0, 1, 2, 3, 4];
 const Q_OPTIONS = Array.from({ length: 16 }, (_, index) => index);
 const SESSION_OPTIONS = [0, 1, 2, 3];
+const REGION_OPTIONS: Array<{ label: string; value: RegionBandSelection }> = [
+  { label: 'US', value: 'US' },
+  { label: 'ETSI', value: 'ETSI' },
+  { label: 'VN', value: 'VN' },
+  { label: 'JP', value: 'JP' },
+  { label: 'KOR', value: 'KOR' },
+  { label: 'Custom', value: 'Custom' },
+];
 const PROFILE_SELECT_OPTIONS = LINK_PROFILES.map((item) => ({ label: item.label, value: item.id }));
 const DWELL_SELECT_OPTIONS = DWELL_OPTIONS.map((item) => ({ label: String(item), value: item }));
 const INTERVAL_SELECT_OPTIONS = INTERVAL_OPTIONS.map((item) => ({ label: `${item} ms`, value: item }));
@@ -32,12 +40,39 @@ const Q_SELECT_OPTIONS = Q_OPTIONS.map((item) => ({ label: String(item), value: 
 const SESSION_SELECT_OPTIONS = SESSION_OPTIONS.map((item) => ({ label: `S${item}`, value: item }));
 const FIELD_CLASS = 'soft-surface h-10 w-full rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#1D1D1F] outline-none focus:border-[#52c7da]/60 sm:h-9';
 const COMPACT_BUTTON_CLASS = 'h-10 text-[10px] font-bold tracking-wide sm:h-8';
+const REGION_MIN_KHZ = 840000;
+const REGION_MAX_KHZ = 960000;
+const VN_REGION_DEFAULT = { startKHz: 918500, count: 9, space125KHz: 4 };
 const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const normalizeProfileValue = (value: unknown, fallback = 53) => {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+const normalizeRegionNumber = (value: unknown, fallback: number) => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : fallback;
+};
+const isVnDefaultRegion = (regionBand?: SettingsType['regionBand']) => (
+  regionBand?.startKHz === VN_REGION_DEFAULT.startKHz &&
+  regionBand?.count === VN_REGION_DEFAULT.count &&
+  regionBand?.space125KHz === VN_REGION_DEFAULT.space125KHz
+);
+const normalizeRegionSelection = (regionBand?: SettingsType['regionBand']): RegionBandSelection => {
+  const val = String(regionBand?.val ?? '').toUpperCase();
+
+  if (regionBand?.mode === 'custom') {
+    return val === 'VN' && isVnDefaultRegion(regionBand) ? 'VN' : 'Custom';
+  }
+
+  return REGION_OPTIONS.some((option) => option.value === val) && val !== 'Custom'
+    ? val as RegionBandSelection
+    : 'US';
+};
+const formatFrequencyMHz = (khz: number | undefined) => (
+  typeof khz === 'number' && Number.isFinite(khz) ? `${(khz / 1000).toFixed(3)} MHz` : '--'
+);
 type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
+type SettingsSelectId = SelectFieldId | 'region';
 type SelectOption = { label: string; value: number };
 type SettingsAction = () => void | Promise<void>;
 type SettingsActionSource = 'early' | 'click';
@@ -95,8 +130,8 @@ const SelectField = ({
 }: {
   id: SelectFieldId;
   onChange: (value: number) => void;
-  onOpenChange: React.Dispatch<React.SetStateAction<SelectFieldId | null>>;
-  openSelect: SelectFieldId | null;
+  onOpenChange: React.Dispatch<React.SetStateAction<SettingsSelectId | null>>;
+  openSelect: SettingsSelectId | null;
   options: SelectOption[];
   value: number;
 }) => {
@@ -169,6 +204,85 @@ const SelectField = ({
   );
 };
 
+const RegionSelectField = ({
+  onChange,
+  onOpenChange,
+  openSelect,
+  value,
+}: {
+  onChange: (value: RegionBandSelection) => void;
+  onOpenChange: React.Dispatch<React.SetStateAction<SettingsSelectId | null>>;
+  openSelect: SettingsSelectId | null;
+  value: RegionBandSelection;
+}) => {
+  const selectRef = useRef<HTMLDivElement>(null);
+  const isOpen = openSelect === 'region';
+  const selectedOption = REGION_OPTIONS.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!selectRef.current?.contains(event.target as Node)) {
+        onOpenChange(null);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isOpen, onOpenChange]);
+
+  return (
+    <div ref={selectRef} className="relative">
+      <button
+        type="button"
+        className={`${FIELD_CLASS} flex items-center justify-between text-left`}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        onClick={() => onOpenChange((current) => current === 'region' ? null : 'region')}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            onOpenChange(null);
+          }
+        }}
+      >
+        <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
+        <ChevronDown
+          size={16}
+          strokeWidth={2.2}
+          className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && (
+        <div
+          role="listbox"
+          className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 touch-pan-y overscroll-contain overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
+        >
+          {REGION_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={value === option.value}
+              className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
+                value === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
+              }`}
+              onClick={() => {
+                onChange(option.value);
+                onOpenChange(null);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
   const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
@@ -176,9 +290,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const [session, setSession] = useState(settings.session);
   const [queryInterval, setQueryInterval] = useState(settings.scanParams?.interval || 0);
   const [dwell, setDwell] = useState(settings.scanParams?.dwell || 0);
-  const [openSelect, setOpenSelect] = useState<SelectFieldId | null>(null);
+  const [openSelect, setOpenSelect] = useState<SettingsSelectId | null>(null);
   const [append, setAppend] = useState(settings.scanParams?.append || 0);
   const [tagFocus, setTagFocus] = useState(settings.tagFocus);
+  const [regionSelection, setRegionSelection] = useState<RegionBandSelection>(() => normalizeRegionSelection(settings.regionBand));
+  const [customStartKHz, setCustomStartKHz] = useState(() => normalizeRegionNumber(settings.regionBand?.startKHz, VN_REGION_DEFAULT.startKHz));
+  const [customCount, setCustomCount] = useState(() => normalizeRegionNumber(settings.regionBand?.count, VN_REGION_DEFAULT.count));
+  const [customSpace, setCustomSpace] = useState(() => normalizeRegionNumber(settings.regionBand?.space125KHz, VN_REGION_DEFAULT.space125KHz));
+  const [saveRegion, setSaveRegion] = useState(settings.regionBand?.save ?? true);
   const [popupContent, setPopupContent] = useState('Hello!');
   const [popupTime, setPopupTime] = useState(2000);
   const [popupBeep, setPopupBeep] = useState(true);
@@ -190,6 +309,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const qSessionSyncRevision = settings.syncRevision?.qSession ?? 0;
   const queryParamsSyncRevision = settings.syncRevision?.queryParams ?? 0;
   const tagFocusSyncRevision = settings.syncRevision?.tagFocus ?? 0;
+  const regionBandSyncRevision = settings.syncRevision?.regionBand ?? 0;
 
   useEffect(() => {
     setPower(settings.power);
@@ -210,6 +330,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   useEffect(() => {
     setTagFocus(settings.tagFocus);
   }, [settings.tagFocus, tagFocusSyncRevision]);
+
+  useEffect(() => {
+    setRegionSelection(normalizeRegionSelection(settings.regionBand));
+    setCustomStartKHz(normalizeRegionNumber(settings.regionBand?.startKHz, VN_REGION_DEFAULT.startKHz));
+    setCustomCount(normalizeRegionNumber(settings.regionBand?.count, VN_REGION_DEFAULT.count));
+    setCustomSpace(normalizeRegionNumber(settings.regionBand?.space125KHz, VN_REGION_DEFAULT.space125KHz));
+    if (typeof settings.regionBand?.save === 'boolean') {
+      setSaveRegion(settings.regionBand.save);
+    }
+  }, [regionBandSyncRevision, settings.regionBand]);
 
   useEffect(() => {
     if (!settings.scanParams) return;
@@ -235,7 +365,41 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const handleSetQueryParams = () => bleService.setQueryParam(queryInterval, dwell, append);
   const handleGetTagFocus = () => bleService.getTagFocus();
   const handleSetTagFocus = () => bleService.setTagFocus(tagFocus);
+  const handleGetRegion = () => bleService.getRegion();
   const adjustPower = (delta: number) => setPower((current) => clampNumber(current + delta, 0, 30));
+  const customStepKHz = customSpace * 125;
+  const customEndKHz = customStartKHz + Math.max(0, customCount - 1) * customStepKHz;
+  const customRegionError = useMemo(() => {
+    if (customStartKHz < REGION_MIN_KHZ || customStartKHz > REGION_MAX_KHZ) {
+      return `Start must be ${REGION_MIN_KHZ}..${REGION_MAX_KHZ} kHz`;
+    }
+    if (customCount < 1 || customCount > 255) {
+      return 'Channel count must be 1..255';
+    }
+    if (customSpace < 1 || customSpace > 255) {
+      return 'Space must be 1..255';
+    }
+    if (customEndKHz > REGION_MAX_KHZ) {
+      return `End frequency ${customEndKHz} kHz exceeds ${REGION_MAX_KHZ} kHz`;
+    }
+    return '';
+  }, [customCount, customEndKHz, customSpace, customStartKHz]);
+  const handleRegionChange = (value: RegionBandSelection) => {
+    setRegionSelection(value);
+    if (value === 'Custom') {
+      setCustomStartKHz(normalizeRegionNumber(settings.regionBand?.startKHz, VN_REGION_DEFAULT.startKHz));
+      setCustomCount(normalizeRegionNumber(settings.regionBand?.count, VN_REGION_DEFAULT.count));
+      setCustomSpace(normalizeRegionNumber(settings.regionBand?.space125KHz, VN_REGION_DEFAULT.space125KHz));
+    }
+  };
+  const handleSetRegion = () => {
+    if (regionSelection === 'Custom') {
+      if (customRegionError) return;
+      return bleService.setCustomRegion(customStartKHz, customCount, customSpace, saveRegion);
+    }
+
+    return bleService.setRegion(regionSelection, saveRegion);
+  };
   const tagFocusIndicatorStyle: React.CSSProperties = {
     width: 'calc((100% - 0.5rem) / 2)',
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
@@ -292,7 +456,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     },
   });
 
-  const ActionRow = ({ id, onGet, onSet }: { id: string; onGet: SettingsAction; onSet: SettingsAction }) => (
+  const ActionRow = ({
+    id,
+    onGet,
+    onSet,
+    setDisabled = false,
+  }: {
+    id: string;
+    onGet: SettingsAction;
+    onSet: SettingsAction;
+    setDisabled?: boolean;
+  }) => (
     <div className="mt-3 grid grid-cols-2 gap-2">
       <Button
         {...getSettingsActionHandlers(`${id}:get`, onGet)}
@@ -306,6 +480,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
       </Button>
       <Button
         {...getSettingsActionHandlers(`${id}:set`, onSet)}
+        disabled={setDisabled}
         variant="primary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
@@ -426,6 +601,88 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
             ))}
           </div>
           <ActionRow id="tag-focus" onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
+        </SettingsCard>
+
+        <SettingsCard
+          actionId="region-band"
+          activeActionKey={activeActionKey}
+          title="RFID Region Band"
+          subtitle="Reader frequency plan"
+          className={`relative overflow-visible xl:col-span-2 ${openSelect === 'region' ? 'z-[120]' : 'z-10'}`}
+        >
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_104px]">
+            <div>
+              <FieldLabel>Region</FieldLabel>
+              <RegionSelectField
+                value={regionSelection}
+                onChange={handleRegionChange}
+                openSelect={openSelect}
+                onOpenChange={setOpenSelect}
+              />
+            </div>
+            <div className="flex items-end">
+              <label className="soft-surface flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#52666B] sm:h-9">
+                <input
+                  type="checkbox"
+                  checked={saveRegion}
+                  onChange={(event) => setSaveRegion(event.target.checked)}
+                  className="h-4 w-4 accent-[#52c7da]"
+                />
+                Save
+              </label>
+            </div>
+          </div>
+
+          {regionSelection === 'Custom' && (
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)]">
+              <div>
+                <FieldLabel>Start Freq, kHz</FieldLabel>
+                <input
+                  type="number"
+                  min={REGION_MIN_KHZ}
+                  max={REGION_MAX_KHZ}
+                  value={customStartKHz}
+                  onChange={(event) => setCustomStartKHz(normalizeRegionNumber(event.target.value, 0))}
+                  className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customStartKHz < REGION_MIN_KHZ || customStartKHz > REGION_MAX_KHZ) ? 'border-[#FF3B30]/60' : ''}`}
+                />
+              </div>
+              <div>
+                <FieldLabel>Count</FieldLabel>
+                <input
+                  type="number"
+                  min={1}
+                  max={255}
+                  value={customCount}
+                  onChange={(event) => setCustomCount(normalizeRegionNumber(event.target.value, 1))}
+                  className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customCount < 1 || customCount > 255) ? 'border-[#FF3B30]/60' : ''}`}
+                />
+              </div>
+              <div>
+                <FieldLabel>Space</FieldLabel>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={255}
+                    value={customSpace}
+                    onChange={(event) => setCustomSpace(normalizeRegionNumber(event.target.value, 1))}
+                    className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customSpace < 1 || customSpace > 255) ? 'border-[#FF3B30]/60' : ''}`}
+                  />
+                  <span className="shrink-0 text-[11px] font-bold text-[#6E7F83]">x125 kHz</span>
+                </div>
+              </div>
+              <p className={`font-mono text-[11px] font-bold sm:col-span-3 ${customRegionError ? 'text-[#C32118]' : 'text-[#0C4F5B]'}`}>
+                {customRegionError || `End ${customEndKHz} kHz (${formatFrequencyMHz(customEndKHz)}), step ${customStepKHz} kHz`}
+              </p>
+            </div>
+          )}
+
+          <ActionRow
+            id="region-band"
+            onGet={handleGetRegion}
+            onSet={handleSetRegion}
+            setDisabled={regionSelection === 'Custom' && Boolean(customRegionError)}
+          />
         </SettingsCard>
 
         <SettingsCard

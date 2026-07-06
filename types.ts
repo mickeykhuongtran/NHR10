@@ -34,6 +34,24 @@ export interface SettingsSyncRevision {
   qSession: number;
   queryParams: number;
   tagFocus: number;
+  regionBand: number;
+}
+
+export type RegionBandPreset = 'US' | 'ETSI' | 'VN' | 'JP' | 'KOR';
+export type RegionBandSelection = RegionBandPreset | 'Custom';
+export type RegionBandMode = 'template' | 'custom' | 'unknown';
+
+export interface RegionBandConfig {
+  val: string;
+  mode: RegionBandMode;
+  freband?: number;
+  min?: number;
+  max?: number;
+  startKHz?: number;
+  count?: number;
+  space125KHz?: number;
+  stepKHz?: number;
+  save?: boolean;
 }
 
 export interface Settings {
@@ -55,6 +73,7 @@ export interface Settings {
   battery: number;
   batteryState?: string;
   deviceInfo: string;
+  regionBand?: RegionBandConfig;
   syncRevision?: SettingsSyncRevision;
 }
 

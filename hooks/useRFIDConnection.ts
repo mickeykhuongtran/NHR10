@@ -25,6 +25,38 @@ const parseLinkProfile = (data: any): number | null => (
   parseFiniteNumber(data.val ?? data.profile ?? data.linkProfile ?? data.link_profile)
 );
 
+const parseRegionBand = (data: any): Settings['regionBand'] | null => {
+  if (data.status === 'err') return null;
+
+  const modeValue = String(data.mode ?? '').toLowerCase();
+  const mode = modeValue === 'template' || modeValue === 'custom' ? modeValue : 'unknown';
+  const val = typeof data.val === 'string' && data.val.trim() ? data.val.trim().toUpperCase() : mode === 'custom' ? 'CUSTOM' : '';
+  const startKHz = parseFiniteNumber(data.start_khz ?? data.start);
+  const count = parseFiniteNumber(data.count);
+  const space125KHz = parseFiniteNumber(data.space_125khz ?? data.space);
+  const stepKHz = parseFiniteNumber(data.step_khz) ?? (space125KHz !== null ? space125KHz * 125 : null);
+  const freband = parseFiniteNumber(data.freband);
+  const min = parseFiniteNumber(data.min);
+  const max = parseFiniteNumber(data.max);
+
+  if (!val && mode === 'unknown' && startKHz === null && count === null) {
+    return null;
+  }
+
+  return {
+    val,
+    mode,
+    ...(freband !== null ? { freband } : {}),
+    ...(min !== null ? { min } : {}),
+    ...(max !== null ? { max } : {}),
+    ...(startKHz !== null ? { startKHz } : {}),
+    ...(count !== null ? { count } : {}),
+    ...(space125KHz !== null ? { space125KHz } : {}),
+    ...(stepKHz !== null ? { stepKHz } : {}),
+    ...(typeof data.save === 'boolean' ? { save: data.save } : {}),
+  };
+};
+
 type InventoryMode = 'idle' | 'interactive' | 'batch' | 'batchSaving' | 'locate';
 type SettingsSyncKey = keyof SettingsSyncRevision;
 
@@ -34,6 +66,7 @@ const createSettingsSyncRevision = (): SettingsSyncRevision => ({
   qSession: 0,
   queryParams: 0,
   tagFocus: 0,
+  regionBand: 0,
 });
 
 const bumpSettingsSyncRevision = (settings: Settings, key: SettingsSyncKey): SettingsSyncRevision => {
@@ -229,6 +262,12 @@ export const useRFIDConnection = () => {
         const val = parseInt(String(data.val));
         setSettings(prev => ({ ...prev, tagFocus: val === 1, syncRevision: bumpSettingsSyncRevision(prev, 'tagFocus') }));
     }
+    if (data.cmd === 'GF' || data.cmd === 'SF') {
+        const regionBand = parseRegionBand(data);
+        if (regionBand) {
+            setSettings(prev => ({ ...prev, regionBand, syncRevision: bumpSettingsSyncRevision(prev, 'regionBand') }));
+        }
+    }
   }, [markBatteryHeartbeat, markDeviceActivity]);
 
   const connect = async () => {
@@ -265,6 +304,7 @@ export const useRFIDConnection = () => {
       await bleService.getQSession();
       await bleService.getQueryParam();
       await bleService.getTagFocus();
+      await bleService.getRegion();
       await bleService.getTemperature();
 
     } catch (e: any) {
