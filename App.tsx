@@ -169,9 +169,10 @@ const handleDataReceived = useCallback((data: any) => {
     bleService.setCallbacks(
       handleDataReceived, 
       (msg, type) => connection.addLog(msg, type), 
-      fileTransfer.handleFileCallback
+      fileTransfer.handleFileCallback,
+      connection.handleConnectionStatusChange,
     );
-  }, [handleDataReceived, connection.addLog, fileTransfer.handleFileCallback]);
+  }, [handleDataReceived, connection.addLog, connection.handleConnectionStatusChange, fileTransfer.handleFileCallback]);
 
   useEffect(() => {
     if (connection.status !== 'disconnected' && connection.status !== 'error') return;

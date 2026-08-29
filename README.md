@@ -53,12 +53,12 @@ npm run lint
 1. Open the web app.
 2. Press `Connect`.
 3. The browser opens the Bluetooth device picker.
-4. Select a device whose advertised name starts with `NHR-10` or `Nextwaves`.
-5. The app connects to the GATT server, gets service `FF`, and discovers characteristics `FF01`, `FF02`, and `FF03`.
-6. The app starts notifications on `FF01`.
-7. The app reads the initial reader state: device info, firmware, battery, power, link profile, Q/session, query params, Tag Focus, and temperature.
+4. Select the device whose advertised name is `NHR10-XXXXXX`; `XXXXXX` must match the Display ID shown by the handheld. Legacy `NHR-10` and `Nextwaves` names remain supported during migration.
+5. The app connects to GATT and verifies the standard Device Information Service: Model Number must be `NHR-10`, Serial Number must be a Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits), and its final six digits must match the advertised name.
+6. The app gets service `FF`, discovers characteristics `FF01`, `FF02`, and `FF03`, and starts notifications on `FF01`.
+7. The app reads the initial reader state: device identity, firmware, battery, power, link profile, Q/session, query params, Tag Focus, and temperature. The `DI.id` value is checked against the GATT Serial Number before it is displayed.
 
-After connection, the app starts a heartbeat loop to verify that the device is still online. If the app is idle and battery updates stop, or if scanning is active but `FF01` traffic stops, the app marks the device as disconnected so the UI does not show stale state.
+After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes three bounded reconnect attempts (1 s, 2 s, and 4 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
 
 ### 3.2 Scanner Tab
 
@@ -193,12 +193,14 @@ The device uses a custom BLE service:
 | `FF01` | `0000ff01-0000-1000-8000-00805f9b34fb` | Send JSON commands, receive responses and live tag notifications |
 | `FF02` | `0000ff02-0000-1000-8000-00805f9b34fb` | Request batch file by writing `send_file` |
 | `FF03` | `0000ff03-0000-1000-8000-00805f9b34fb` | Receive batch file notifications |
+| Device Information | `0000180a-0000-1000-8000-00805f9b34fb` | Model, Canonical ID, firmware, hardware, and manufacturer validation |
 
 Device selector:
 
-- Prefer `namePrefix: "NHR-10"` or `namePrefix: "Nextwaves"`.
-- Always pass `optionalServices: [SERVICE_UUID]`.
+- Prefer the advertised custom service UUID and the new `namePrefix: "NHR10-"`; retain `NHR-10` and `Nextwaves` filters only for migration.
+- Always pass both the custom service and Device Information Service in `optionalServices`.
 - If a runtime cannot parse the filters, fallback to `acceptAllDevices: true`, but still pass `optionalServices`.
+- Never use `BluetoothDevice.id`, an Android BLE address, or an iOS peripheral UUID as the business identity. Use the verified Canonical ID.
 
 ## 6. Operation State Machine
 
@@ -454,7 +456,8 @@ The key point: the new app does not have to use Web Bluetooth. As long as it kee
 ## 13. Integration Checklist
 
 - If using Web Bluetooth, connect must be triggered by a user action.
-- Always include the custom service UUID in `optionalServices`.
+- Always include the custom service UUID and Device Information Service in `optionalServices`.
+- Validate the Canonical ID after connecting and after every automatic reconnect.
 - Do not send parallel commands on the same characteristic.
 - Keep a small delay between command writes.
 - Do not run `interactive`, `batch`, and `locate` at the same time.

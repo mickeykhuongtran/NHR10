@@ -124,6 +124,17 @@ export const useRFIDConnection = () => {
     }));
   }, []);
 
+  const resetConnectionTracking = useCallback(() => {
+    lastBatteryHeartbeatRef.current = null;
+    lastDeviceActivityRef.current = null;
+    lastLiveTagsAtRef.current = null;
+    lastBatteryPollAtRef.current = 0;
+    inventoryActiveRef.current = false;
+    inventoryModeRef.current = 'idle';
+    setInventoryActiveState(false);
+    setInventoryModeState('idle');
+  }, []);
+
   const markDeviceActivity = useCallback((cmd?: string) => {
     const now = Date.now();
     lastDeviceActivityRef.current = now;
@@ -155,28 +166,31 @@ export const useRFIDConnection = () => {
     if (heartbeatTimeoutReportedRef.current) return;
 
     heartbeatTimeoutReportedRef.current = true;
-    lastBatteryHeartbeatRef.current = null;
-    lastDeviceActivityRef.current = null;
-    lastLiveTagsAtRef.current = null;
-    lastBatteryPollAtRef.current = 0;
-    inventoryActiveRef.current = false;
-    inventoryModeRef.current = 'idle';
-    setInventoryActiveState(false);
-    setInventoryModeState('idle');
+    resetConnectionTracking();
     bleService.disconnect();
     setStatus('disconnected');
     clearDeviceTelemetry();
     addLog(reason, 'error');
-  }, [addLog, clearDeviceTelemetry]);
+  }, [addLog, clearDeviceTelemetry, resetConnectionTracking]);
 
   const handleDataReceived = useCallback((data: any) => {
     markDeviceActivity(data.cmd);
 
     // 3. Settings Responses
     if (data.cmd === 'DI') {
-        const deviceName = typeof data.val === 'string' ? data.val.trim() : '';
+        const canonicalId = typeof data.id === 'string' && /^NHR10-[0-9A-F]{12}$/i.test(data.id.trim())
+          ? data.id.trim().toUpperCase()
+          : '';
+        const displayId = typeof data.display_id === 'string' && /^[0-9A-F]{6}$/i.test(data.display_id.trim())
+          ? `NHR10-${data.display_id.trim().toUpperCase()}`
+          : '';
+        const deviceName = canonicalId || displayId || (typeof data.val === 'string' ? data.val.trim() : '');
         if (deviceName) {
-            setSettings(s => ({ ...s, deviceInfo: deviceName }));
+            setSettings(s => ({
+                ...s,
+                deviceInfo: deviceName,
+                ...(typeof data.fw === 'string' && data.fw.trim() ? { version: data.fw.trim() } : {}),
+            }));
         }
     }
     if (data.cmd === 'GRI') {
@@ -270,6 +284,35 @@ export const useRFIDConnection = () => {
     }
   }, [markBatteryHeartbeat, markDeviceActivity]);
 
+  const handleConnectionStatusChange = useCallback((nextStatus: ConnectionStatus, reason?: string) => {
+    if (nextStatus === 'connecting') {
+      setStatus('connecting');
+      return;
+    }
+
+    if (nextStatus === 'connected') {
+      const connectedAt = Date.now();
+      lastBatteryHeartbeatRef.current = connectedAt;
+      lastDeviceActivityRef.current = connectedAt;
+      lastLiveTagsAtRef.current = null;
+      lastBatteryPollAtRef.current = 0;
+      heartbeatTimeoutReportedRef.current = false;
+      setStatus('connected');
+      void bleService.getSettings().catch((error: any) => {
+        addLog(`State sync after reconnect failed: ${error.message}`, 'error');
+      });
+      return;
+    }
+
+    heartbeatTimeoutReportedRef.current = true;
+    resetConnectionTracking();
+    setStatus(nextStatus);
+    clearDeviceTelemetry();
+    if (reason) {
+      addLog(reason, nextStatus === 'error' ? 'error' : 'info');
+    }
+  }, [addLog, clearDeviceTelemetry, resetConnectionTracking]);
+
   const connect = async () => {
     setStatus('connecting');
     heartbeatTimeoutReportedRef.current = false;
@@ -288,12 +331,17 @@ export const useRFIDConnection = () => {
       const connectedAt = Date.now();
       lastBatteryHeartbeatRef.current = connectedAt;
       lastDeviceActivityRef.current = connectedAt;
-      const advertisedName = bleService.getDeviceName().trim();
-      if (advertisedName) {
-        setSettings(s => ({ ...s, deviceInfo: advertisedName }));
+      const identity = bleService.getDeviceIdentity();
+      const deviceLabel = identity?.canonicalId ?? bleService.getDeviceName().trim();
+      if (deviceLabel) {
+        setSettings(s => ({
+          ...s,
+          deviceInfo: deviceLabel,
+          ...(identity?.firmware ? { version: identity.firmware } : {}),
+        }));
       }
       setStatus('connected');
-      addLog('Connected to NHR-10', 'info');
+      addLog(`Connected to ${deviceLabel || 'NHR-10'}`, 'info');
       
       // Init Settings
       await bleService.getDeviceInfo();
@@ -325,14 +373,7 @@ export const useRFIDConnection = () => {
 
   const disconnect = () => {
     heartbeatTimeoutReportedRef.current = true;
-    lastBatteryHeartbeatRef.current = null;
-    lastDeviceActivityRef.current = null;
-    lastLiveTagsAtRef.current = null;
-    lastBatteryPollAtRef.current = 0;
-    inventoryActiveRef.current = false;
-    inventoryModeRef.current = 'idle';
-    setInventoryActiveState(false);
-    setInventoryModeState('idle');
+    resetConnectionTracking();
     bleService.disconnect();
     setStatus('disconnected');
     clearDeviceTelemetry();
@@ -429,6 +470,7 @@ export const useRFIDConnection = () => {
     clearLogs,
     connect,
     disconnect,
+    handleConnectionStatusChange,
     setInventoryActive,
     handleDataReceived // Exported to be combined with other handlers
   };

@@ -30,6 +30,7 @@ interface BluetoothCharacteristicProperties {
 interface BluetoothRemoteGATTCharacteristic extends EventTarget {
   properties?: BluetoothCharacteristicProperties;
   value?: DataView;
+  readValue(): Promise<DataView>;
   writeValue(value: BufferSource): Promise<void>;
   writeValueWithResponse?(value: BufferSource): Promise<void>;
   writeValueWithoutResponse?(value: BufferSource): Promise<void>;
@@ -41,6 +42,12 @@ const SERVICE_UUID = '000000ff-0000-1000-8000-00805f9b34fb';
 const CHAR_CMD_UUID = '0000ff01-0000-1000-8000-00805f9b34fb';
 const CHAR_FILE_REQ_UUID = '0000ff02-0000-1000-8000-00805f9b34fb';
 const CHAR_FILE_DATA_UUID = '0000ff03-0000-1000-8000-00805f9b34fb';
+const DEVICE_INFO_SERVICE_UUID = '0000180a-0000-1000-8000-00805f9b34fb';
+const MODEL_NUMBER_UUID = '00002a24-0000-1000-8000-00805f9b34fb';
+const SERIAL_NUMBER_UUID = '00002a25-0000-1000-8000-00805f9b34fb';
+const FIRMWARE_REVISION_UUID = '00002a26-0000-1000-8000-00805f9b34fb';
+const HARDWARE_REVISION_UUID = '00002a27-0000-1000-8000-00805f9b34fb';
+const MANUFACTURER_NAME_UUID = '00002a29-0000-1000-8000-00805f9b34fb';
 const JSON_FRAME_START = 0x7B; // '{'
 const LIVE_TAGS_MAGIC_0 = 0x4E; // 'N'
 const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
@@ -48,6 +55,17 @@ const LIVE_TAGS_VERSION = 1;
 const LIVE_TAGS_TYPE = 1;
 const LIVE_TAGS_DELIVERY_INTERVAL_MS = 100;
 const COMMAND_WRITE_GAP_MS = 85;
+const RECONNECT_DELAYS_MS = [1000, 2000, 4000] as const;
+
+export type BleDeviceIdentity = {
+  canonicalId: string;
+  displayId: string;
+  advertisedName: string;
+  model: string;
+  firmware: string;
+  hardware: string;
+  manufacturer: string;
+};
 
 type LiveTagsItem = [string, number, number, number];
 type LiveTagsPayload = {
@@ -61,6 +79,7 @@ type DataCallback = (data: any) => void;
 type LogCallback = (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void;
 type FileTransferEvent = 'request' | 'start' | 'progress' | 'complete' | 'busy' | 'error';
 type FileTransferCallback = (event: FileTransferEvent, data?: any) => void;
+type ConnectionCallback = (status: ConnectionStatus, reason?: string) => void;
 type RequestDeviceOptions = {
   acceptAllDevices?: boolean;
   filters?: Array<{ namePrefix?: string; services?: string[] }>;
@@ -88,6 +107,10 @@ class BLEService {
   private onDataReceived: DataCallback | null = null;
   private onLog: LogCallback | null = null;
   private onFileTransfer: FileTransferCallback | null = null;
+  private onConnectionStatus: ConnectionCallback | null = null;
+  private identity: BleDeviceIdentity | null = null;
+  private shouldReconnect = false;
+  private reconnectGeneration = 0;
 
   // File Transfer State
   private isFileTransferring = false;
@@ -108,17 +131,21 @@ class BLEService {
 
   // Bound handler for file notifications
   private boundFileHandler = this.handleFileNotification.bind(this);
+  private boundCmdHandler = this.handleCmdNotification.bind(this);
+  private boundDisconnectHandler = this.handleDisconnect.bind(this);
 
   constructor() {}
 
   setCallbacks(
     onData: DataCallback,
     onLog: LogCallback,
-    onFileTransfer: FileTransferCallback
+    onFileTransfer: FileTransferCallback,
+    onConnectionStatus?: ConnectionCallback,
   ) {
     this.onDataReceived = onData;
     this.onLog = onLog;
     this.onFileTransfer = onFileTransfer;
+    this.onConnectionStatus = onConnectionStatus ?? null;
   }
 
   async connect(): Promise<void> {
@@ -130,31 +157,12 @@ class BLEService {
     this.log('Requesting device...', 'info');
 
     try {
+      this.disconnect();
       this.device = await this.requestDevice(nav);
-
-      this.device!.addEventListener('gattserverdisconnected', this.handleDisconnect.bind(this));
-
-      this.log(`Connecting to ${this.device!.name}...`, 'info');
-      this.server = await this.device!.gatt!.connect();
-
-      this.log('Getting Service...', 'info');
-      this.service = await this.server.getPrimaryService(SERVICE_UUID);
-
-      this.log('Getting Characteristics...', 'info');
-      this.charCmd = await this.service.getCharacteristic(CHAR_CMD_UUID);
-      this.charFileReq = await this.service.getCharacteristic(CHAR_FILE_REQ_UUID);
-      this.charFileData = await this.service.getCharacteristic(CHAR_FILE_DATA_UUID);
-      this.log(`FF01 properties: ${this.formatCharacteristicProperties(this.charCmd)}`, 'info');
-
-      // Setup Notifications for Commands/Tags
-      this.log('Starting Notifications...', 'info');
-      await this.charCmd.startNotifications();
-      this.charCmd.addEventListener('characteristicvaluechanged', this.handleCmdNotification.bind(this));
-
-      // Note: File Data notifications are now started in requestFileTransfer()
-
-      this.log('Connected and ready.', 'info');
+      this.device.addEventListener('gattserverdisconnected', this.boundDisconnectHandler);
+      await this.connectGatt(false);
     } catch (error: any) {
+      this.disconnect();
       this.log(`Connection failed: ${error.message}`, 'error');
       throw error;
     }
@@ -163,10 +171,12 @@ class BLEService {
   private async requestDevice(nav: any): Promise<BluetoothDevice> {
     const filteredOptions: RequestDeviceOptions = {
       filters: [
+        { services: [SERVICE_UUID] },
+        { namePrefix: 'NHR10-' },
         { namePrefix: 'NHR-10' },
         { namePrefix: 'Nextwaves' },
       ],
-      optionalServices: [SERVICE_UUID],
+      optionalServices: [SERVICE_UUID, DEVICE_INFO_SERVICE_UUID],
     };
 
     try {
@@ -181,35 +191,251 @@ class BLEService {
       this.log('Retrying BLE request with iOS-compatible selector...', 'info');
       return nav.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [SERVICE_UUID],
+        optionalServices: [SERVICE_UUID, DEVICE_INFO_SERVICE_UUID],
       });
     }
   }
 
   disconnect() {
-    if (this.device && this.device.gatt?.connected) {
-      this.device.gatt.disconnect();
+    const device = this.device;
+    this.shouldReconnect = false;
+    this.reconnectGeneration += 1;
+    device?.removeEventListener('gattserverdisconnected', this.boundDisconnectHandler);
+    if (device?.gatt?.connected) {
+      device.gatt.disconnect();
     }
     this.clearConnectionState();
   }
 
-  handleDisconnect() {
-    if (!this.device && !this.server && !this.service && !this.charCmd) return;
-    this.log('Device disconnected.', 'error');
-    this.clearConnectionState();
+  private async connectGatt(isReconnect: boolean): Promise<void> {
+    const device = this.device;
+    if (!device?.gatt) {
+      throw new Error('Selected device does not expose a GATT server.');
+    }
+
+    this.log(`${isReconnect ? 'Reconnecting' : 'Connecting'} to ${device.name ?? 'NHR-10'}...`, 'info');
+    this.server = await device.gatt.connect();
+
+    const connectedIdentity = await this.readAndValidateIdentity(this.server, device);
+
+    this.log('Getting Service...', 'info');
+    this.service = await this.server.getPrimaryService(SERVICE_UUID);
+
+    this.log('Getting Characteristics...', 'info');
+    this.charCmd = await this.service.getCharacteristic(CHAR_CMD_UUID);
+    this.charFileReq = await this.service.getCharacteristic(CHAR_FILE_REQ_UUID);
+    this.charFileData = await this.service.getCharacteristic(CHAR_FILE_DATA_UUID);
+    this.log(`FF01 properties: ${this.formatCharacteristicProperties(this.charCmd)}`, 'info');
+
+    this.log('Starting Notifications...', 'info');
+    await this.charCmd.startNotifications();
+    this.charCmd.addEventListener('characteristicvaluechanged', this.boundCmdHandler);
+
+    this.identity = connectedIdentity ?? this.identity;
+    this.shouldReconnect = true;
+    this.log(isReconnect ? 'Reconnected and ready.' : 'Connected and ready.', 'info');
+  }
+
+  private handleDisconnect(event: Event) {
+    const disconnectedDevice = event.target as BluetoothDevice;
+    if (disconnectedDevice !== this.device || !this.shouldReconnect) return;
+
+    this.shouldReconnect = false;
+    this.clearGattState();
+    this.log('Device disconnected unexpectedly.', 'error');
+    this.onConnectionStatus?.('disconnected', 'BLE link lost');
+
+    const reconnectGeneration = ++this.reconnectGeneration;
+    void this.reconnectDevice(disconnectedDevice, reconnectGeneration);
+  }
+
+  private async reconnectDevice(device: BluetoothDevice, reconnectGeneration: number): Promise<void> {
+    let lastError = 'device unavailable';
+
+    for (let attempt = 0; attempt < RECONNECT_DELAYS_MS.length; attempt += 1) {
+      await wait(RECONNECT_DELAYS_MS[attempt]);
+      if (this.device !== device || this.reconnectGeneration !== reconnectGeneration) return;
+
+      this.onConnectionStatus?.('connecting', `Reconnect attempt ${attempt + 1}/${RECONNECT_DELAYS_MS.length}`);
+      try {
+        await this.connectGatt(true);
+        if (this.device !== device || this.reconnectGeneration !== reconnectGeneration) return;
+        this.onConnectionStatus?.('connected');
+        return;
+      } catch (error: any) {
+        lastError = String(error?.message ?? error ?? lastError);
+        this.clearGattState();
+        this.log(`Reconnect attempt ${attempt + 1} failed: ${lastError}`, 'error');
+      }
+    }
+
+    if (this.device !== device || this.reconnectGeneration !== reconnectGeneration) return;
+    this.disconnect();
+    this.onConnectionStatus?.('error', `BLE reconnect failed: ${lastError}`);
+  }
+
+  private async readAndValidateIdentity(
+    server: BluetoothRemoteGATTServer,
+    device: BluetoothDevice,
+  ): Promise<BleDeviceIdentity | null> {
+    const advertisedName = device.name?.trim() ?? '';
+    const displayMatch = /^NHR10-([0-9A-F]{6})$/i.exec(advertisedName);
+    const advertisedDisplayId = displayMatch?.[1].toUpperCase() ?? null;
+    const isLegacyName = /^(NHR-10|Nextwaves)/i.test(advertisedName);
+
+    let model: string;
+    let serial: string;
+    let infoService: BluetoothRemoteGATTService;
+    try {
+      infoService = await server.getPrimaryService(DEVICE_INFO_SERVICE_UUID);
+      // Serialize reads because several Web Bluetooth stacks reject parallel GATT operations.
+      model = await this.readGattText(infoService, MODEL_NUMBER_UUID);
+      serial = await this.readGattText(infoService, SERIAL_NUMBER_UUID);
+    } catch (error: any) {
+      if (isLegacyName) {
+        this.log(`Legacy device without verifiable Device Information Service: ${error.message}`, 'info');
+        return null;
+      }
+      throw new Error(`NHR-10 identity verification failed: ${error.message}`);
+    }
+
+    const firmware = await this.readGattTextOptional(infoService, FIRMWARE_REVISION_UUID, 'Firmware Revision');
+    const hardware = await this.readGattTextOptional(infoService, HARDWARE_REVISION_UUID, 'Hardware Revision');
+    const manufacturer = await this.readGattTextOptional(infoService, MANUFACTURER_NAME_UUID, 'Manufacturer Name');
+
+    const canonicalId = serial.trim().toUpperCase();
+    if (model.trim() !== 'NHR-10') {
+      throw new Error(`NHR-10 identity verification failed: unexpected model "${model.trim()}"`);
+    }
+    if (!/^NHR10-[0-9A-F]{12}$/.test(canonicalId)) {
+      throw new Error(`NHR-10 identity verification failed: invalid Serial Number "${serial.trim()}"`);
+    }
+
+    const displayId = canonicalId.slice(-6);
+    if (advertisedDisplayId && advertisedDisplayId !== displayId) {
+      throw new Error(`NHR-10 identity verification failed: advertised ID ${advertisedDisplayId} does not match Serial Number ${canonicalId}`);
+    }
+    if (this.identity && this.identity.canonicalId !== canonicalId) {
+      throw new Error(`NHR-10 identity verification failed: reconnected device identity changed from ${this.identity.canonicalId} to ${canonicalId}`);
+    }
+
+    this.log(`Verified device identity: ${canonicalId}`, 'info');
+    return {
+      canonicalId,
+      displayId,
+      advertisedName,
+      model: model.trim(),
+      firmware: firmware.trim(),
+      hardware: hardware.trim(),
+      manufacturer: manufacturer.trim(),
+    };
+  }
+
+  private async readGattText(
+    service: BluetoothRemoteGATTService,
+    characteristicUuid: string,
+  ): Promise<string> {
+    const characteristic = await service.getCharacteristic(characteristicUuid);
+    const value = await characteristic.readValue();
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    return new TextDecoder('utf-8').decode(bytes).replace(/\0+$/g, '');
+  }
+
+  private async readGattTextOptional(
+    service: BluetoothRemoteGATTService,
+    characteristicUuid: string,
+    label: string,
+  ): Promise<string> {
+    try {
+      return await this.readGattText(service, characteristicUuid);
+    } catch (error: any) {
+      this.log(`${label} is unavailable: ${error.message}`, 'info');
+      return '';
+    }
+  }
+
+  private validateDeviceInfoResponse(data: any): boolean {
+    if (typeof data?.id !== 'string' || data.id.trim() === '') return true;
+
+    const canonicalId = data.id.trim().toUpperCase();
+    if (!/^NHR10-[0-9A-F]{12}$/.test(canonicalId)) {
+      this.rejectIdentity(`DI returned invalid Canonical ID "${data.id}"`);
+      return false;
+    }
+
+    const displayId = canonicalId.slice(-6);
+    const responseDisplayId = typeof data.display_id === 'string'
+      ? data.display_id.trim().toUpperCase()
+      : displayId;
+    if (responseDisplayId !== displayId) {
+      this.rejectIdentity(`DI Display ID ${responseDisplayId} does not match ${canonicalId}`);
+      return false;
+    }
+    if (this.identity && this.identity.canonicalId !== canonicalId) {
+      this.rejectIdentity(`DI identity ${canonicalId} does not match ${this.identity.canonicalId}`);
+      return false;
+    }
+
+    const advertisedName = this.device?.name?.trim() ?? '';
+    const advertisedMatch = /^NHR10-([0-9A-F]{6})$/i.exec(advertisedName);
+    if (advertisedMatch && advertisedMatch[1].toUpperCase() !== displayId) {
+      this.rejectIdentity(`DI identity ${canonicalId} does not match advertised name ${advertisedName}`);
+      return false;
+    }
+
+    if (!this.identity) {
+      this.identity = {
+        canonicalId,
+        displayId,
+        advertisedName,
+        model: typeof data.val === 'string' ? data.val.trim() : 'NHR-10',
+        firmware: typeof data.fw === 'string' ? data.fw.trim() : '',
+        hardware: typeof data.hw === 'string' ? data.hw.trim() : '',
+        manufacturer: '',
+      };
+      this.log(`Verified legacy device identity from DI: ${canonicalId}`, 'info');
+    } else {
+      this.identity = {
+        ...this.identity,
+        firmware: typeof data.fw === 'string' && data.fw.trim() ? data.fw.trim() : this.identity.firmware,
+        hardware: typeof data.hw === 'string' && data.hw.trim() ? data.hw.trim() : this.identity.hardware,
+      };
+    }
+
+    return true;
+  }
+
+  private rejectIdentity(reason: string) {
+    const message = `NHR-10 identity verification failed: ${reason}`;
+    this.log(message, 'error');
+    this.onConnectionStatus?.('error', message);
+    this.disconnect();
   }
 
   getDeviceName(): string {
     return this.device?.name ?? '';
   }
 
+  getDeviceIdentity(): BleDeviceIdentity | null {
+    return this.identity ? { ...this.identity } : null;
+  }
+
   private clearConnectionState() {
+    this.device?.removeEventListener('gattserverdisconnected', this.boundDisconnectHandler);
+    this.clearGattState();
+    this.shouldReconnect = false;
+    this.identity = null;
+    this.device = null;
+  }
+
+  private clearGattState() {
+    this.charCmd?.removeEventListener('characteristicvaluechanged', this.boundCmdHandler);
+    this.charFileData?.removeEventListener('characteristicvaluechanged', this.boundFileHandler);
     this.resetFileState();
     this.commandQueue = Promise.resolve();
     this.lastCommandWriteAt = 0;
     this.acceptLiveTags = false;
     this.clearPendingLiveTags();
-    this.device = null;
     this.server = null;
     this.service = null;
     this.charCmd = null;
@@ -328,6 +554,10 @@ class BLEService {
     
     try {
       const data = JSON.parse(value);
+
+      if (data.cmd === 'DI' && !this.validateDeviceInfoResponse(data)) {
+        return;
+      }
 
       if (data.cmd === 'live_tags') {
         if (!this.acceptLiveTags) {
