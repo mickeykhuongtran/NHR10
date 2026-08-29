@@ -5,6 +5,7 @@ import { Input } from '../ui/Input';
 import { PageHeader } from './PageHeader';
 
 interface LocateTabProps {
+  isConnected: boolean;
   onLocate: (epc: string) => void;
   onStopLocate: () => void;
   targetRssi: number | null; // Null if not found recently
@@ -13,7 +14,7 @@ interface LocateTabProps {
   setTargetEpc: (epc: string) => void;
 }
 
-export const LocateTab: React.FC<LocateTabProps> = ({ onLocate, onStopLocate, targetRssi, isLocating, targetEpc, setTargetEpc }) => {
+export const LocateTab: React.FC<LocateTabProps> = ({ isConnected, onLocate, onStopLocate, targetRssi, isLocating, targetEpc, setTargetEpc }) => {
   const [signalStrength, setSignalStrength] = useState(0);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export const LocateTab: React.FC<LocateTabProps> = ({ onLocate, onStopLocate, ta
               ? 'border-[#52c7da]/35 bg-[#E7F9FC] text-[#166B78]'
               : 'border-[#DDECEF] bg-white/58 text-[#6E7F83]'
           }`}>
-            {isLocating ? 'Tracking' : 'Ready'}
+            {isLocating ? 'Tracking' : isConnected ? 'Ready' : 'Offline'}
           </span>
         }
       />
@@ -62,7 +63,8 @@ export const LocateTab: React.FC<LocateTabProps> = ({ onLocate, onStopLocate, ta
               fullWidth
               size="md"
               onClick={() => isLocating ? onStopLocate() : onLocate(targetEpc)}
-              disabled={!targetEpc && !isLocating}
+              disabled={!isConnected || (!targetEpc && !isLocating)}
+              title={!isConnected ? 'Connect the NHR-10 before locating a tag' : undefined}
               variant={isLocating ? 'danger' : 'primary'}
               className="h-10 font-semibold tracking-wide"
             >
@@ -98,7 +100,7 @@ export const LocateTab: React.FC<LocateTabProps> = ({ onLocate, onStopLocate, ta
                 {targetRssi !== null ? `${targetRssi} dBm` : '--'}
               </p>
               <p className="mt-1 text-[11px] font-medium text-[#6E6E73]">
-                {targetRssi !== null ? 'Signal detected' : 'Waiting for target response'}
+                {targetRssi !== null ? 'Signal detected' : isConnected ? 'Waiting for target response' : 'Connect BLE to start locating'}
               </p>
             </div>
           </div>

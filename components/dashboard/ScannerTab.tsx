@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { flushSync } from 'react-dom';
-import { Play, Square, Database, FilterX, RotateCcw, Copy, Check, X } from 'lucide-react';
+import { Play, Square, Database, FilterX, RotateCcw, Copy, Check, X, BluetoothOff } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BatchSaveInfo, ScanStats, Tag } from '../../types';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -150,6 +150,8 @@ const EpcCell = React.memo(({
 EpcCell.displayName = 'EpcCell';
 
 interface ScannerTabProps {
+  isConnected: boolean;
+  onConnect: () => void;
   isScanning: boolean;
   activeScanType: 'interactive' | 'batch' | null;
   scanStartedAt: number | null;
@@ -175,6 +177,8 @@ interface ScannerTabProps {
 }
 
 export const ScannerTab: React.FC<ScannerTabProps> = ({
+  isConnected,
+  onConnect,
   isScanning,
   activeScanType,
   scanStartedAt,
@@ -457,7 +461,8 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           runPrimaryScanAction('early');
         }}
         onClick={() => runPrimaryScanAction('click')}
-        disabled={activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
+        disabled={!isConnected || activeScanType === 'batch' || (isBatchSaving && activeScanType !== 'interactive')}
+        title={!isConnected ? 'Connect the NHR-10 before scanning' : undefined}
         className={`${isMobileSticky ? 'h-11 min-w-0 flex-1 text-xs' : 'h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none'} ${
           activeScanType !== 'interactive' ? 'bg-[#52c7da] border-[#52c7da] hover:bg-[#42b9cc]' : ''
         }`}
@@ -483,7 +488,8 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           runBatchScanAction('early');
         }}
         onClick={() => runBatchScanAction('click')}
-        disabled={activeScanType === 'interactive' || isBatchSaving}
+        disabled={!isConnected || activeScanType === 'interactive' || isBatchSaving}
+        title={!isConnected ? 'Connect the NHR-10 before starting batch mode' : undefined}
         className={`${isMobileSticky ? 'h-11 min-w-0 flex-1 text-xs' : 'h-10 min-w-[132px] flex-1 text-xs sm:h-9 sm:flex-none'}`}
       >
         {isBatchSaving ? (
@@ -691,7 +697,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
 
   const MobileMetric = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="min-h-[42px] rounded-md border border-[#DDECEF]/80 bg-white/62 px-2 py-1">
-      <p className="text-[9px] font-bold uppercase tracking-wide text-[#7A8E92]">{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-[#7A8E92] sm:text-[11px]">{label}</p>
       <div className="mt-0.5 font-mono text-xs font-bold text-[#166B78]">{children}</div>
     </div>
   );
@@ -909,7 +915,7 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
                   key={preset.mode}
                   type="button"
                   onClick={() => handlePresetClick(preset.mode)}
-                  disabled={isBatchSaving}
+                  disabled={!isConnected || isBatchSaving}
                   aria-label={`${preset.label}: ${preset.description}`}
                   className={`group relative z-10 h-7 px-3 text-[10px] font-semibold uppercase transition-colors focus:outline-none focus-visible:text-[#166B78] ${
                     activePreset === preset.mode
@@ -1087,9 +1093,19 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
               {viewportMode !== 'phone' && <TableHeader variant={tableVariant} />}
               <div className={`relative min-h-0 flex-1 ${viewportMode === 'phone' ? 'overflow-hidden' : 'overflow-x-auto'}`}>
                 {displayedTags.length === 0 ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[#7A8E92]">
-                    <Database size={32} strokeWidth={1} />
-                    <p className="font-mono text-xs">{tags.length > 0 ? 'All live tags are excluded' : 'No tags'}</p>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center text-[#7A8E92]">
+                    {!isConnected && tags.length === 0 ? <BluetoothOff size={34} strokeWidth={1.25} /> : <Database size={32} strokeWidth={1} />}
+                    <p className="font-mono text-xs font-semibold text-[#52666B]">
+                      {!isConnected && tags.length === 0 ? 'Connect your NHR-10 to begin' : tags.length > 0 ? 'All live tags are excluded' : 'No tags detected yet'}
+                    </p>
+                    {!isConnected && tags.length === 0 && (
+                      <>
+                        <p className="max-w-xs text-[11px] font-medium leading-4 text-[#7A8E92]">1. Power on the reader · 2. Enable Bluetooth · 3. Select CONNECT BLE</p>
+                        <Button variant="primary" size="sm" onClick={onConnect} className="mt-1 h-9 min-w-[150px] text-xs font-bold">
+                          CONNECT BLE
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <AutoSizer>

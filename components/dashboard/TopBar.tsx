@@ -21,6 +21,13 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
   const isConnected = status === 'connected';
   const batteryPercent = calculateBatteryPercent(settings.battery);
   const displayDeviceName = settings.deviceInfo.trim() || 'NHR-10';
+  const statusLabel = status === 'connected'
+    ? 'ONLINE'
+    : status === 'connecting'
+      ? 'CONNECTING'
+      : status === 'error'
+        ? 'CONNECTION ERROR'
+        : 'OFFLINE';
 
   const getBatteryIcon = (percent: number) => {
     if (percent > 80) return BatteryFull;
@@ -50,9 +57,14 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
         {/* Status Indicator */}
         <div className="soft-surface flex items-center gap-2 rounded-md border border-[#52c7da]/30 px-2.5 py-1">
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[#34C759]' : status === 'connecting' ? 'bg-[#FF9500] animate-pulse' : 'bg-[#FF3B30]'}`} />
-          <span className="text-[10px] font-semibold text-[#6E6E73]">
-            {status === 'connected' ? 'ONLINE' : status === 'connecting' ? 'CONNECTING' : 'OFFLINE'}
-          </span>
+          <div className="min-w-0 leading-tight">
+            <span className="block text-[10px] font-semibold text-[#6E6E73]">{statusLabel}</span>
+            {isConnected && (
+              <span className="block max-w-[126px] truncate font-mono text-[10px] font-semibold text-[#166B78] lg:hidden" title={displayDeviceName}>
+                {displayDeviceName}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Telemetry */}
@@ -70,7 +82,7 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
             </div>
             <div className="soft-surface hidden lg:flex items-center gap-2 text-[#6E6E73] px-2 py-0.5 rounded-lg text-[10px] font-mono border border-[#52c7da]/20">
               <Info size={12} />
-              <span>{displayDeviceName}</span>
+              <span title={displayDeviceName}>{displayDeviceName}</span>
             </div>
           </>
         )}
@@ -86,7 +98,7 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
           {isConnected ? (
             <div className="flex items-center gap-1.5"><Bluetooth size={12} /> DISCONNECT</div>
           ) : (
-            <div className="flex items-center gap-1.5"><Bluetooth size={12} /> CONNECT BLE</div>
+            <div className="flex items-center gap-1.5"><Bluetooth size={12} /> {status === 'error' ? 'RETRY BLE' : 'CONNECT BLE'}</div>
           )}
         </Button>
       </div>

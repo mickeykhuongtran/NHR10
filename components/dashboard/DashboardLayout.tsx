@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Radio, Crosshair, ScanBarcode, SlidersHorizontal, SquareTerminal, Database, Code2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Code2, Crosshair, Database, MoreHorizontal, Radio, ScanBarcode, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
 import { TopBar } from './TopBar';
 import { ScannerTab } from './ScannerTab';
 import { LocateTab } from './LocateTab';
@@ -62,6 +62,9 @@ interface DashboardLayoutProps {
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   const [activeTab, setActiveTab] = useState<number>(1);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [toastLog, setToastLog] = useState<LogEntry | null>(null);
+  const lastToastTimestampRef = useRef(0);
   const [locateEpc, setLocateEpc] = useState<string>('');
   const [scannerExcludedEpcs, setScannerExcludedEpcs] = useState<string[]>([]);
   const [scannerExcludedSnapshots, setScannerExcludedSnapshots] = useState<Record<string, Tag>>({});
@@ -71,10 +74,30 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
     { id: 2, label: 'Locate', icon: Crosshair },
     { id: 3, label: 'Encode', icon: ScanBarcode },
     { id: 6, label: 'Storage', icon: Database },
-    { id: 4, label: 'Setting', icon: SlidersHorizontal },
+    { id: 4, label: 'Settings', icon: SlidersHorizontal },
     { id: 7, label: 'Develop', icon: Code2 },
     { id: 5, label: 'Debug', icon: SquareTerminal },
   ];
+  const primaryMobileTabIds = new Set([1, 2, 3, 6]);
+  const moreTabs = tabs.filter((tab) => !primaryMobileTabIds.has(tab.id));
+  const isMoreTabActive = moreTabs.some((tab) => tab.id === activeTab);
+
+  useEffect(() => {
+    const latestNotice = [...props.logs].reverse().find((entry) => (
+      entry.type === 'error' || /connected|reconnect|saved|success|failed|offline|popup sent/i.test(entry.message)
+    ));
+    if (!latestNotice || latestNotice.timestamp <= lastToastTimestampRef.current) return;
+
+    lastToastTimestampRef.current = latestNotice.timestamp;
+    setToastLog(latestNotice);
+    const timeoutId = window.setTimeout(() => setToastLog(null), latestNotice.type === 'error' ? 6500 : 4200);
+    return () => window.clearTimeout(timeoutId);
+  }, [props.logs]);
+
+  const selectTab = (tabId: number) => {
+    setActiveTab(tabId);
+    setMobileMoreOpen(false);
+  };
 
   return (
     <div className="app-space flex flex-col h-[100dvh] overflow-hidden text-[#1D1D1F]">
@@ -89,30 +112,69 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden relative min-h-0">
         {/* Sidebar / Bottom Navigation */}
         <nav
-          className="soft-glass-strong order-2 flex w-full shrink-0 border-t border-[#52c7da]/30 lg:order-1 lg:w-56 lg:flex-col lg:border-r lg:border-t-0 z-20"
+          className="soft-glass-strong relative order-2 flex w-full shrink-0 border-t border-[#52c7da]/30 lg:order-1 lg:w-56 lg:flex-col lg:border-r lg:border-t-0 z-20"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
-          <div className="scrollbar-none flex w-full flex-row items-center justify-around overflow-x-auto lg:flex-col lg:justify-start lg:overflow-y-auto lg:px-3 lg:py-4 lg:space-y-1">
+          {mobileMoreOpen && (
+            <div
+              id="mobile-more-navigation"
+              className="soft-glass absolute bottom-[calc(100%+0.5rem)] right-2 z-[210] w-52 rounded-xl border border-[#52c7da]/30 bg-white/92 p-2 shadow-[0_18px_48px_rgba(18,78,90,0.2)] backdrop-blur-2xl lg:hidden"
+            >
+              <p className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7A8E92]">Engineering tools</p>
+              {moreTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => selectTab(tab.id)}
+                    className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-bold uppercase tracking-wide transition-colors ${
+                      isActive ? 'bg-[#E7F9FC] text-[#166B78]' : 'text-[#52666B] hover:bg-[#F3FCFE]'
+                    }`}
+                  >
+                    <Icon size={18} className={isActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="scrollbar-none flex w-full flex-row items-center justify-around overflow-x-hidden lg:flex-col lg:justify-start lg:overflow-y-auto lg:px-3 lg:py-4 lg:space-y-1">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const isPrimaryMobileTab = primaryMobileTabIds.has(tab.id);
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex min-w-[58px] flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:min-w-[64px] sm:px-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:rounded-xl lg:px-3 lg:py-3 ${
+                  onClick={() => selectTab(tab.id)}
+                  className={`${isPrimaryMobileTab ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:px-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:rounded-xl lg:px-3 lg:py-3 ${
                     isActive 
                       ? 'bg-white/70 text-[#166B78] shadow-sm shadow-[#52c7da]/10'
                       : 'text-[#6E6E73] hover:bg-white/45 hover:text-[#166B78]'
                   }`}
                 >
                   <Icon size={isActive ? 21 : 19} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
-                  <span className={`text-[9px] font-bold uppercase tracking-wide sm:text-[10px] lg:text-[13px] whitespace-nowrap ${isActive ? 'text-[#166B78]' : ''}`}>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide sm:text-[11px] lg:text-[13px] whitespace-nowrap ${isActive ? 'text-[#166B78]' : ''}`}>
                     {tab.label.toUpperCase()}
                   </span>
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setMobileMoreOpen((current) => !current)}
+              aria-expanded={mobileMoreOpen}
+              aria-controls="mobile-more-navigation"
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:px-2 lg:hidden ${
+                isMoreTabActive || mobileMoreOpen ? 'bg-white/70 text-[#166B78] shadow-sm' : 'text-[#6E6E73]'
+              }`}
+            >
+              <MoreHorizontal size={isMoreTabActive ? 21 : 19} className={isMoreTabActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
+              <span className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wide sm:text-[11px]">MORE</span>
+            </button>
           </div>
           
           <div className="p-4 border-t border-[#52c7da]/20 hidden lg:block mt-auto">
@@ -141,6 +203,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               stats={props.scanStats}
               onApplyPreset={props.onApplyPreset}
               isBatchSaving={props.isBatchSaving}
+              isConnected={props.status === 'connected'}
+              onConnect={props.onConnect}
               batchSaveInfo={props.batchSaveInfo}
               excludedEpcs={scannerExcludedEpcs}
               excludedSnapshots={scannerExcludedSnapshots}
@@ -157,6 +221,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               isLocating={props.isLocating}
               targetEpc={locateEpc}
               setTargetEpc={setLocateEpc}
+              isConnected={props.status === 'connected'}
             />
           )}
 
@@ -166,6 +231,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               onWriteData={props.onWriteData}
               writeStatus={props.writeStatus}
               writeMessage={props.writeMessage}
+              isConnected={props.status === 'connected'}
             />
           )}
 
@@ -183,6 +249,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               transferStatus={props.transferStatus}
               isBatchSaving={props.isBatchSaving}
               batchSaveInfo={props.batchSaveInfo}
+              isConnected={props.status === 'connected'}
+              onConnect={props.onConnect}
             />
           )}
 
@@ -193,6 +261,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               onSaveSetting={props.onSaveSetting}
               onSaveConfig={props.onSaveConfig}
               onShowPopup={props.onShowPopup}
+              isConnected={props.status === 'connected'}
             />
           )}
 
@@ -219,6 +288,23 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
             />
           )}
         </main>
+
+        {toastLog && (
+          <div
+            role={toastLog.type === 'error' ? 'alert' : 'status'}
+            className={`absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-[220] flex max-w-[calc(100%-1.5rem)] items-start gap-2 rounded-xl border px-3 py-2.5 shadow-[0_16px_44px_rgba(18,78,90,0.2)] backdrop-blur-2xl lg:bottom-4 lg:max-w-md ${
+              toastLog.type === 'error'
+                ? 'border-[#FF3B30]/30 bg-white/94 text-[#A82118]'
+                : 'border-[#34C759]/30 bg-white/94 text-[#247A38]'
+            }`}
+          >
+            {toastLog.type === 'error' ? <AlertTriangle size={17} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
+            <p className="min-w-0 flex-1 text-xs font-semibold leading-4">{toastLog.message}</p>
+            <button type="button" onClick={() => setToastLog(null)} aria-label="Dismiss notification" className="rounded p-0.5 opacity-65 hover:opacity-100">
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

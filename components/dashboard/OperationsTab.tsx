@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { PenTool, Database, Lock, ScanBarcode } from 'lucide-react';
+import { PenTool, Database, Lock, ScanBarcode, AlertTriangle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { PageHeader } from './PageHeader';
 
 interface OperationsTabProps {
+  isConnected: boolean;
   onWriteEpc: (targetEpc: string, newEpc: string, password?: string) => void;
   onWriteData: (epc: string, mem: number, ptr: number, data: string, password?: string) => void;
   writeStatus: 'idle' | 'pending' | 'success' | 'error';
   writeMessage: string;
 }
 
-export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWriteData, writeStatus, writeMessage }) => {
+export const OperationsTab: React.FC<OperationsTabProps> = ({ isConnected, onWriteEpc, onWriteData, writeStatus, writeMessage }) => {
   const [quickEpc, setQuickEpc] = useState('');
   const [quickPwd, setQuickPwd] = useState('');
 
@@ -20,6 +21,7 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
   const [ptr, setPtr] = useState(2); // Default Pointer
   const [hexData, setHexData] = useState('');
   const [advPwd, setAdvPwd] = useState('');
+  const [pendingConfirmation, setPendingConfirmation] = useState<'quick' | 'advanced' | null>(null);
 
   const handleQuickWrite = () => {
     onWriteEpc('', quickEpc, quickPwd);
@@ -33,6 +35,13 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
     }
   };
 
+  const confirmWrite = () => {
+    if (!isConnected || writeStatus === 'pending') return;
+    if (pendingConfirmation === 'quick') handleQuickWrite();
+    if (pendingConfirmation === 'advanced') handleAdvWrite();
+    setPendingConfirmation(null);
+  };
+
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
       <PageHeader
@@ -40,7 +49,9 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
         title="ENCODE"
         subtitle="Write EPC or memory-bank data with a compact, step-oriented workflow."
         meta={
-          writeStatus !== 'idle' ? (
+          !isConnected ? (
+            <span className="rounded-full border border-[#FF9500]/35 bg-[#FF9500]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#A45A00]">Offline</span>
+          ) : writeStatus !== 'idle' ? (
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
               writeStatus === 'success'
                 ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]'
@@ -94,8 +105,9 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
         <Button 
           fullWidth 
           size="md" 
-          onClick={handleQuickWrite} 
-          disabled={writeStatus === 'pending' || !quickEpc}
+          onClick={() => setPendingConfirmation('quick')}
+          disabled={!isConnected || writeStatus === 'pending' || !quickEpc}
+          title={!isConnected ? 'Connect the NHR-10 before writing EPC data' : undefined}
           variant="primary"
           className="h-8"
         >
@@ -180,14 +192,35 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ onWriteEpc, onWrit
         <Button 
           fullWidth 
           size="md" 
-          onClick={handleAdvWrite} 
-          disabled={writeStatus === 'pending' || !advEpc || !hexData}
+          onClick={() => setPendingConfirmation('advanced')}
+          disabled={!isConnected || writeStatus === 'pending' || !advEpc || !hexData}
+          title={!isConnected ? 'Connect the NHR-10 before writing memory data' : undefined}
           variant="secondary"
           className="bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 h-8"
         >
           {writeStatus === 'pending' ? 'WRITING...' : 'EXECUTE WRITE OPERATION'}
         </Button>
       </section>
+
+      {pendingConfirmation && (
+        <section role="alertdialog" aria-labelledby="confirm-write-title" className="rounded-lg border border-[#FF9500]/35 bg-[#FFF7E8] p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-[#C56A00]" />
+            <div className="min-w-0 flex-1">
+              <h3 id="confirm-write-title" className="text-sm font-bold text-[#7A3F00]">Confirm irreversible tag write</h3>
+              <p className="mt-1 break-words text-xs font-medium leading-5 text-[#8A5A24]">
+                {pendingConfirmation === 'quick'
+                  ? `Write EPC ${quickEpc} to the detected tag? Verify only the intended tag is in the RF field.`
+                  : `Write ${hexData} to bank ${memBank}, pointer ${ptr}, on tag ${advEpc}?`}
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" size="sm" onClick={() => setPendingConfirmation(null)} className="h-9 sm:min-w-[108px]">CANCEL</Button>
+                <Button variant="danger" size="sm" onClick={confirmWrite} className="h-9 sm:min-w-[150px]">CONFIRM WRITE</Button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Status Message */}
       {writeMessage && (

@@ -5,6 +5,8 @@ import { BatchHistoryRecord, BatchSaveInfo, FileTransferStatus } from '../../typ
 import { PageHeader } from './PageHeader';
 
 interface HistoryTabProps {
+  isConnected: boolean;
+  onConnect: () => void;
   onFetchHistory: () => void;
   onDownloadJson: () => void;
   onDownloadCsv: () => void;
@@ -20,6 +22,8 @@ interface HistoryTabProps {
 }
 
 export const HistoryTab: React.FC<HistoryTabProps> = ({ 
+  isConnected,
+  onConnect,
   onFetchHistory, 
   onDownloadJson,
   onDownloadCsv,
@@ -132,7 +136,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       <PageHeader
         icon={Database}
         title="STORAGE"
-        subtitle={isWaitingForDevice ? `Saving on device ${saveProgress}%` : hasData ? `${historyData.length} unique EPCs loaded` : 'Fetch batch EPC list from device memory.'}
+        subtitle={isWaitingForDevice ? `Saving on device ${saveProgress}%` : hasData ? `${historyData.length} unique EPCs loaded` : isConnected ? 'Fetch batch EPC list from device memory.' : 'Connect BLE to access device storage.'}
         actions={
           hasData && (
             <>
@@ -214,22 +218,24 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               )}
             </div>
             <div className="space-y-2">
-              <h3 className="text-slate-300 font-bold">{isWaitingForDevice ? 'Saving on Device' : 'No Data Loaded'}</h3>
+              <h3 className="text-slate-300 font-bold">{isWaitingForDevice ? 'Saving on Device' : isConnected ? 'No Data Loaded' : 'Reader Offline'}</h3>
               <p className="text-slate-500 text-xs">
                 {isWaitingForDevice
                   ? `${saveDetail}. Fetch will be enabled after saved.`
-                  : 'Fetch data from the device internal memory to preview and download unique EPC results.'}
+                  : isConnected
+                    ? 'Fetch data from the device internal memory to preview and download unique EPC results.'
+                    : 'Connect the NHR-10, then fetch the saved batch EPC list.'}
               </p>
             </div>
             <Button 
               fullWidth 
               size="lg" 
-              onClick={onFetchHistory}
-              disabled={isWaitingForDevice}
+              onClick={isConnected ? onFetchHistory : onConnect}
+              disabled={isConnected && isWaitingForDevice}
               className="h-12 text-sm font-bold tracking-wider"
             >
               <RefreshCw size={18} className={`mr-2 ${isWaitingForDevice ? 'animate-spin' : ''}`} />
-              {isWaitingForDevice ? `SAVING... ${saveProgress}%` : 'FETCH DATA FROM DEVICE'}
+              {isWaitingForDevice ? `SAVING... ${saveProgress}%` : isConnected ? 'FETCH DATA FROM DEVICE' : 'CONNECT BLE'}
             </Button>
           </div>
         )}

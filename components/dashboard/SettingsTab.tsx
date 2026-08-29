@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RegionBandSelection, Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
 import { PageHeader } from './PageHeader';
 
 interface SettingsTabProps {
+  isConnected: boolean;
   settings: SettingsType;
   onUpdateSettings: (key: keyof SettingsType, value: any) => void;
   onSaveSetting: (key: string, value: any) => void;
@@ -283,7 +284,7 @@ const RegionSelectField = ({
   );
 };
 
-export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig, onShowPopup }) => {
+export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
   const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
   const [qValue, setQValue] = useState(settings.qValue);
@@ -302,6 +303,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   const [popupTime, setPopupTime] = useState(2000);
   const [popupBeep, setPopupBeep] = useState(true);
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
+  const [confirmSave, setConfirmSave] = useState(false);
   const settingsActionAtRef = useRef(0);
   const activeActionTimerRef = useRef<number | null>(null);
   const powerSyncRevision = settings.syncRevision?.power ?? 0;
@@ -354,6 +356,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
       window.clearTimeout(activeActionTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!isConnected) setConfirmSave(false);
+  }, [isConnected]);
 
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
@@ -417,6 +423,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
   };
 
   const runSettingsAction = (actionKey: string, action: SettingsAction, source: SettingsActionSource) => {
+    if (!isConnected) return;
     const now = Date.now();
     if (source === 'click' && now - settingsActionAtRef.current < 650) {
       return;
@@ -470,6 +477,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     <div className="mt-3 grid grid-cols-2 gap-2">
       <Button
         {...getSettingsActionHandlers(`${id}:get`, onGet)}
+        disabled={!isConnected}
         variant="secondary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
@@ -480,7 +488,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
       </Button>
       <Button
         {...getSettingsActionHandlers(`${id}:set`, onSet)}
-        disabled={setDisabled}
+        disabled={!isConnected || setDisabled}
         variant="primary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
@@ -496,8 +504,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
     <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
       <PageHeader
         icon={SlidersHorizontal}
-        title="SETTING"
+        title="SETTINGS"
         subtitle="Tune RF power, Gen2 behavior, inventory timing, and device utilities."
+        meta={<span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isConnected ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]' : 'border-[#FF9500]/35 bg-[#FF9500]/10 text-[#A45A00]'}`}>{isConnected ? 'Device online' : 'Offline · controls locked'}</span>}
       />
 
       <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -770,6 +779,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
           </div>
           <Button
             onClick={() => onShowPopup(popupContent, popupTime, popupBeep)}
+            disabled={!isConnected}
+            title={!isConnected ? 'Connect the NHR-10 before sending a popup' : undefined}
             variant="primary"
             size="sm"
             fullWidth
@@ -785,10 +796,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onSaveConfig
               <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">Save Configuration</h3>
               <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">Persist current settings to device memory</p>
             </div>
-            <Button onClick={onSaveConfig} variant="danger" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
+            <Button onClick={() => setConfirmSave(true)} disabled={!isConnected} title={!isConnected ? 'Connect the NHR-10 before saving configuration' : undefined} variant="danger" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
               SAVE CONFIG TO FLASH
             </Button>
           </div>
+          {confirmSave && (
+            <div role="alertdialog" aria-labelledby="confirm-save-title" className="mt-3 flex flex-col gap-3 rounded-lg border border-[#FF9500]/35 bg-[#FFF7E8] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[#C56A00]" />
+                <div>
+                  <h4 id="confirm-save-title" className="text-xs font-bold text-[#7A3F00]">Persist current configuration?</h4>
+                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-[#8A5A24]">This overwrites the configuration stored in device flash.</p>
+                </div>
+              </div>
+              <div className="flex gap-2 sm:shrink-0">
+                <Button variant="outline" size="sm" onClick={() => setConfirmSave(false)} className="h-9 flex-1 sm:min-w-[90px]">CANCEL</Button>
+                <Button variant="danger" size="sm" onClick={() => { onSaveConfig(); setConfirmSave(false); }} className="h-9 flex-1 sm:min-w-[130px]">CONFIRM SAVE</Button>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </div>
