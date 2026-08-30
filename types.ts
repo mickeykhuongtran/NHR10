@@ -72,7 +72,10 @@ export interface Settings {
   temperature: number;
   battery: number;
   batteryState?: string;
+  /** Short, human-readable name shown in the UI (for example NHR10-8658A8). */
   deviceInfo: string;
+  /** Full identity verified from the firmware DI response; never used as the primary label. */
+  deviceCanonicalId: string;
   regionBand?: RegionBandConfig;
   syncRevision?: SettingsSyncRevision;
 }

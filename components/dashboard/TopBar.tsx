@@ -21,6 +21,10 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
   const isConnected = status === 'connected';
   const batteryPercent = calculateBatteryPercent(settings.battery);
   const displayDeviceName = settings.deviceInfo.trim() || 'NHR-10';
+  const canonicalDeviceId = settings.deviceCanonicalId.trim();
+  const deviceIdentityHint = canonicalDeviceId
+    ? `${displayDeviceName} · Canonical ID: ${canonicalDeviceId}`
+    : displayDeviceName;
   const statusLabel = status === 'connected'
     ? 'ONLINE'
     : status === 'connecting'
@@ -60,7 +64,11 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
           <div className="min-w-0 leading-tight">
             <span className="block text-[10px] font-semibold text-[#6E6E73]">{statusLabel}</span>
             {isConnected && (
-              <span className="block max-w-[126px] truncate font-mono text-[10px] font-semibold text-[#166B78] lg:hidden" title={displayDeviceName}>
+              <span
+                className="block max-w-[126px] truncate font-mono text-[10px] font-semibold text-[#166B78] lg:hidden"
+                title={deviceIdentityHint}
+                aria-label={deviceIdentityHint}
+              >
                 {displayDeviceName}
               </span>
             )}
@@ -80,9 +88,13 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
               <Thermometer size={14} className="text-[#FF9500]" />
               <span className="font-mono text-xs font-medium text-[#424245]">{settings.temperature}°C</span>
             </div>
-            <div className="soft-surface hidden lg:flex items-center gap-2 text-[#6E6E73] px-2 py-0.5 rounded-lg text-[10px] font-mono border border-[#52c7da]/20">
+            <div
+              className="soft-surface hidden lg:flex items-center gap-2 text-[#6E6E73] px-2 py-0.5 rounded-lg text-[10px] font-mono border border-[#52c7da]/20"
+              title={deviceIdentityHint}
+              aria-label={deviceIdentityHint}
+            >
               <Info size={12} />
-              <span title={displayDeviceName}>{displayDeviceName}</span>
+              <span>{displayDeviceName}</span>
             </div>
           </>
         )}

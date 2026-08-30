@@ -25,6 +25,34 @@ const parseLinkProfile = (data: any): number | null => (
   parseFiniteNumber(data.val ?? data.profile ?? data.linkProfile ?? data.link_profile)
 );
 
+const formatDeviceDisplayName = (
+  advertisedName: string,
+  displayId?: string,
+  fallbackName?: string,
+): string => {
+  const advertised = advertisedName.trim();
+  const normalizedDisplayId = displayId?.trim().toUpperCase().replace(/^NHR10-/, '') ?? '';
+  const fallback = fallbackName?.trim() ?? '';
+
+  // Keep the Bluetooth advertising name as the user-facing label. If a device
+  // advertises its canonical ID, shorten it to the same six-hex display format.
+  const advertisedCanonicalMatch = advertised.match(/^NHR10-([0-9A-F]{12})$/i);
+  if (advertisedCanonicalMatch) {
+    return `NHR10-${advertisedCanonicalMatch[1].slice(-6).toUpperCase()}`;
+  }
+  if (advertised) return advertised;
+
+  if (/^[0-9A-F]{6}$/.test(normalizedDisplayId)) {
+    return `NHR10-${normalizedDisplayId}`;
+  }
+
+  const fallbackCanonicalMatch = fallback.match(/^NHR10-([0-9A-F]{12})$/i);
+  if (fallbackCanonicalMatch) {
+    return `NHR10-${fallbackCanonicalMatch[1].slice(-6).toUpperCase()}`;
+  }
+  return fallback;
+};
+
 const parseRegionBand = (data: any): Settings['regionBand'] | null => {
   if (data.status === 'err') return null;
 
@@ -102,6 +130,7 @@ export const useRFIDConnection = () => {
     battery: 0,
     batteryState: 'normal',
     deviceInfo: '',
+    deviceCanonicalId: '',
     syncRevision: createSettingsSyncRevision(),
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -121,6 +150,7 @@ export const useRFIDConnection = () => {
       batteryState: 'normal',
       temperature: 0,
       deviceInfo: '',
+      deviceCanonicalId: '',
     }));
   }, []);
 
@@ -182,13 +212,15 @@ export const useRFIDConnection = () => {
           ? data.id.trim().toUpperCase()
           : '';
         const displayId = typeof data.display_id === 'string' && /^[0-9A-F]{6}$/i.test(data.display_id.trim())
-          ? `NHR10-${data.display_id.trim().toUpperCase()}`
+          ? data.display_id.trim().toUpperCase()
           : '';
-        const deviceName = canonicalId || displayId || (typeof data.val === 'string' ? data.val.trim() : '');
+        const fallbackName = typeof data.val === 'string' ? data.val.trim() : '';
+        const deviceName = formatDeviceDisplayName(bleService.getDeviceName(), displayId, fallbackName || canonicalId);
         if (deviceName) {
             setSettings(s => ({
                 ...s,
                 deviceInfo: deviceName,
+                deviceCanonicalId: canonicalId,
                 ...(typeof data.fw === 'string' && data.fw.trim() ? { version: data.fw.trim() } : {}),
             }));
         }
@@ -332,11 +364,16 @@ export const useRFIDConnection = () => {
       lastBatteryHeartbeatRef.current = connectedAt;
       lastDeviceActivityRef.current = connectedAt;
       const identity = bleService.getDeviceIdentity();
-      const deviceLabel = identity?.canonicalId ?? bleService.getDeviceName().trim();
+      const deviceLabel = formatDeviceDisplayName(
+        bleService.getDeviceName(),
+        identity?.displayId,
+        identity?.canonicalId,
+      );
       if (deviceLabel) {
         setSettings(s => ({
           ...s,
           deviceInfo: deviceLabel,
+          deviceCanonicalId: identity?.canonicalId ?? '',
           ...(identity?.firmware ? { version: identity.firmware } : {}),
         }));
       }
