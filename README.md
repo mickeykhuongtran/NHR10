@@ -58,7 +58,7 @@ npm run lint
 6. The web client issues `DI` over `FF01` and verifies that its Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits) matches the six-digit advertised device name. It does not read Device Information Serial Number `0x2A25`, which Web Bluetooth blocklists for privacy.
 7. Only after identity verification succeeds does the app mark the transport ready and read the initial reader state: firmware, battery, power, link profile, Q/session, query params, Tag Focus, region, and temperature.
 
-After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes three bounded reconnect attempts (1 s, 2 s, and 4 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity through `DI`, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
+After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes five bounded reconnect attempts (0.5 s, 1 s, 2 s, 4 s, and 8 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity through `DI`, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
 
 ### 3.2 Scanner Tab
 
@@ -193,7 +193,6 @@ The device uses a custom BLE service:
 | `FF01` | `0000ff01-0000-1000-8000-00805f9b34fb` | Send JSON commands, receive responses and live tag notifications |
 | `FF02` | `0000ff02-0000-1000-8000-00805f9b34fb` | Request batch file by writing `send_file` |
 | `FF03` | `0000ff03-0000-1000-8000-00805f9b34fb` | Receive batch file notifications |
-| Device Information | `0000180a-0000-1000-8000-00805f9b34fb` | Model, Canonical ID, firmware, hardware, and manufacturer validation |
 
 Device selector:
 
@@ -201,6 +200,12 @@ Device selector:
 - Always pass the custom service in `optionalServices` for the `acceptAllDevices` fallback. Do not request or read the blocklisted Device Information Serial Number `0x2A25` from a Web Bluetooth client.
 - If a runtime cannot parse the filters, fallback to `acceptAllDevices: true`, but still pass `optionalServices`.
 - Never use `BluetoothDevice.id`, an Android BLE address, or an iOS peripheral UUID as the business identity. Use the verified Canonical ID.
+
+### Device-initiated unpair
+
+When `FF01` sends `{"cmd":"UQ","v":1}`, the transport treats it as an intentional unpair rather than link loss. It synchronously disables reconnect, cancels the reconnect delay and queued commands, clears persisted device/auto-connect keys, and immediately writes `{"cmd":"UA","v":1}` to `FF01` with response. The app does not close GATT before this ACK and waits for the peripheral to disconnect.
+
+After that disconnect, the selected device reference is released and no reconnect is scheduled. A new connection is possible only through the user-initiated Bluetooth picker. Other JSON packets and binary `live_tags` packets on `FF01` keep their existing handling.
 
 ## 6. Operation State Machine
 

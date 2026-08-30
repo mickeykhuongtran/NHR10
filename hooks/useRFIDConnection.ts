@@ -167,13 +167,16 @@ export const useRFIDConnection = () => {
 
   const markDeviceOffline = useCallback((reason = 'Device battery heartbeat timeout') => {
     if (heartbeatTimeoutReportedRef.current) return;
+    if (bleService.isIntentionalUnpairPending()) return;
 
     heartbeatTimeoutReportedRef.current = true;
     resetConnectionTracking();
-    bleService.disconnect();
-    setStatus('disconnected');
-    clearDeviceTelemetry();
-    addLog(reason, 'error');
+    const recoveryStarted = bleService.recoverFromUnexpectedLinkTimeout(reason);
+    if (!recoveryStarted) {
+      setStatus('disconnected');
+      clearDeviceTelemetry();
+      addLog(reason, 'error');
+    }
   }, [addLog, clearDeviceTelemetry, resetConnectionTracking]);
 
   const handleDataReceived = useCallback((data: any) => {
@@ -366,6 +369,10 @@ export const useRFIDConnection = () => {
       await bleService.getTemperature();
 
     } catch (e: any) {
+      if (bleService.isIntentionalUnpairPending()) {
+        addLog('Device unpair is in progress; waiting for peripheral disconnect.', 'info');
+        return;
+      }
       lastBatteryHeartbeatRef.current = null;
       lastDeviceActivityRef.current = null;
       lastLiveTagsAtRef.current = null;
