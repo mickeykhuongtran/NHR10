@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { bleService } from '../services/bleService';
 import { ConnectionStatus, Settings, LogEntry, SettingsSyncRevision } from '../types';
+import { formatDeviceDisplayName } from '../utils/deviceIdentity';
 
 const IDLE_BATTERY_POLL_INTERVAL_MS = 2000;
 const IDLE_BATTERY_TIMEOUT_MS = 6000;
@@ -24,34 +25,6 @@ const parseFiniteNumber = (value: unknown): number | null => {
 const parseLinkProfile = (data: any): number | null => (
   parseFiniteNumber(data.val ?? data.profile ?? data.linkProfile ?? data.link_profile)
 );
-
-const formatDeviceDisplayName = (
-  advertisedName: string,
-  displayId?: string,
-  fallbackName?: string,
-): string => {
-  const advertised = advertisedName.trim();
-  const normalizedDisplayId = displayId?.trim().toUpperCase().replace(/^NHR10-/, '') ?? '';
-  const fallback = fallbackName?.trim() ?? '';
-
-  // Keep the Bluetooth advertising name as the user-facing label. If a device
-  // advertises its canonical ID, shorten it to the same six-hex display format.
-  const advertisedCanonicalMatch = advertised.match(/^NHR10-([0-9A-F]{12})$/i);
-  if (advertisedCanonicalMatch) {
-    return `NHR10-${advertisedCanonicalMatch[1].slice(-6).toUpperCase()}`;
-  }
-  if (advertised) return advertised;
-
-  if (/^[0-9A-F]{6}$/.test(normalizedDisplayId)) {
-    return `NHR10-${normalizedDisplayId}`;
-  }
-
-  const fallbackCanonicalMatch = fallback.match(/^NHR10-([0-9A-F]{12})$/i);
-  if (fallbackCanonicalMatch) {
-    return `NHR10-${fallbackCanonicalMatch[1].slice(-6).toUpperCase()}`;
-  }
-  return fallback;
-};
 
 const parseRegionBand = (data: any): Settings['regionBand'] | null => {
   if (data.status === 'err') return null;

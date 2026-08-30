@@ -2,6 +2,7 @@ import React from 'react';
 import { Bluetooth, BatteryFull, BatteryMedium, BatteryLow, Thermometer, Info } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { ConnectionStatus, Settings } from '../../types';
+import { formatDeviceDisplayName } from '../../utils/deviceIdentity';
 import logoUrl from '../../logo/nws_logo.png';
 
 interface TopBarProps {
@@ -20,7 +21,7 @@ const calculateBatteryPercent = (mv: number) => {
 export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onDisconnect }) => {
   const isConnected = status === 'connected';
   const batteryPercent = calculateBatteryPercent(settings.battery);
-  const displayDeviceName = settings.deviceInfo.trim() || 'NHR-10';
+  const displayDeviceName = formatDeviceDisplayName('', undefined, settings.deviceInfo) || 'NHR-10';
   const canonicalDeviceId = settings.deviceCanonicalId.trim();
   const deviceIdentityHint = canonicalDeviceId
     ? `${displayDeviceName} · Canonical ID: ${canonicalDeviceId}`
