@@ -54,11 +54,11 @@ npm run lint
 2. Press `Connect`.
 3. The browser opens the Bluetooth device picker.
 4. Select the device whose advertised name is `NHR10-XXXXXX`; `XXXXXX` must match the Display ID shown by the handheld. Legacy `NHR-10` and `Nextwaves` names remain supported during migration.
-5. The app connects to GATT and verifies the standard Device Information Service: Model Number must be `NHR-10`, Serial Number must be a Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits), and its final six digits must match the advertised name.
-6. The app gets service `FF`, discovers characteristics `FF01`, `FF02`, and `FF03`, and starts notifications on `FF01`.
-7. The app reads the initial reader state: device identity, firmware, battery, power, link profile, Q/session, query params, Tag Focus, and temperature. The `DI.id` value is checked against the GATT Serial Number before it is displayed.
+5. The app connects to GATT, gets service `FF`, discovers characteristics `FF01`, `FF02`, and `FF03`, and starts notifications on `FF01`.
+6. The web client issues `DI` over `FF01` and verifies that its Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits) matches the six-digit advertised device name. It does not read Device Information Serial Number `0x2A25`, which Web Bluetooth blocklists for privacy.
+7. Only after identity verification succeeds does the app mark the transport ready and read the initial reader state: firmware, battery, power, link profile, Q/session, query params, Tag Focus, region, and temperature.
 
-After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes three bounded reconnect attempts (1 s, 2 s, and 4 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
+After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes three bounded reconnect attempts (1 s, 2 s, and 4 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity through `DI`, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
 
 ### 3.2 Scanner Tab
 
@@ -198,7 +198,7 @@ The device uses a custom BLE service:
 Device selector:
 
 - Prefer the advertised custom service UUID and the new `namePrefix: "NHR10-"`; retain `NHR-10` and `Nextwaves` filters only for migration.
-- Always pass both the custom service and Device Information Service in `optionalServices`.
+- Always pass the custom service in `optionalServices` for the `acceptAllDevices` fallback. Do not request or read the blocklisted Device Information Serial Number `0x2A25` from a Web Bluetooth client.
 - If a runtime cannot parse the filters, fallback to `acceptAllDevices: true`, but still pass `optionalServices`.
 - Never use `BluetoothDevice.id`, an Android BLE address, or an iOS peripheral UUID as the business identity. Use the verified Canonical ID.
 
@@ -456,7 +456,7 @@ The key point: the new app does not have to use Web Bluetooth. As long as it kee
 ## 13. Integration Checklist
 
 - If using Web Bluetooth, connect must be triggered by a user action.
-- Always include the custom service UUID and Device Information Service in `optionalServices`.
+- Always include the custom service UUID in `optionalServices`; verify web identities through `DI` instead of the blocklisted `0x2A25` characteristic.
 - Validate the Canonical ID after connecting and after every automatic reconnect.
 - Do not send parallel commands on the same characteristic.
 - Keep a small delay between command writes.

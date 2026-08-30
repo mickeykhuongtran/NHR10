@@ -30,7 +30,6 @@ interface BluetoothCharacteristicProperties {
 interface BluetoothRemoteGATTCharacteristic extends EventTarget {
   properties?: BluetoothCharacteristicProperties;
   value?: DataView;
-  readValue(): Promise<DataView>;
   writeValue(value: BufferSource): Promise<void>;
   writeValueWithResponse?(value: BufferSource): Promise<void>;
   writeValueWithoutResponse?(value: BufferSource): Promise<void>;
@@ -42,12 +41,6 @@ const SERVICE_UUID = '000000ff-0000-1000-8000-00805f9b34fb';
 const CHAR_CMD_UUID = '0000ff01-0000-1000-8000-00805f9b34fb';
 const CHAR_FILE_REQ_UUID = '0000ff02-0000-1000-8000-00805f9b34fb';
 const CHAR_FILE_DATA_UUID = '0000ff03-0000-1000-8000-00805f9b34fb';
-const DEVICE_INFO_SERVICE_UUID = '0000180a-0000-1000-8000-00805f9b34fb';
-const MODEL_NUMBER_UUID = '00002a24-0000-1000-8000-00805f9b34fb';
-const SERIAL_NUMBER_UUID = '00002a25-0000-1000-8000-00805f9b34fb';
-const FIRMWARE_REVISION_UUID = '00002a26-0000-1000-8000-00805f9b34fb';
-const HARDWARE_REVISION_UUID = '00002a27-0000-1000-8000-00805f9b34fb';
-const MANUFACTURER_NAME_UUID = '00002a29-0000-1000-8000-00805f9b34fb';
 const JSON_FRAME_START = 0x7B; // '{'
 const LIVE_TAGS_MAGIC_0 = 0x4E; // 'N'
 const LIVE_TAGS_MAGIC_1 = 0x48; // 'H'
@@ -56,6 +49,7 @@ const LIVE_TAGS_TYPE = 1;
 const LIVE_TAGS_DELIVERY_INTERVAL_MS = 100;
 const COMMAND_WRITE_GAP_MS = 85;
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000] as const;
+const IDENTITY_RESPONSE_TIMEOUT_MS = 3000;
 
 export type BleDeviceIdentity = {
   canonicalId: string;
@@ -80,6 +74,11 @@ type LogCallback = (msg: string, type: 'info' | 'error' | 'rx' | 'tx') => void;
 type FileTransferEvent = 'request' | 'start' | 'progress' | 'complete' | 'busy' | 'error';
 type FileTransferCallback = (event: FileTransferEvent, data?: any) => void;
 type ConnectionCallback = (status: ConnectionStatus, reason?: string) => void;
+type PendingIdentityVerification = {
+  resolve: (identity: BleDeviceIdentity | null) => void;
+  reject: (error: Error) => void;
+  timeoutId: number;
+};
 type RequestDeviceOptions = {
   acceptAllDevices?: boolean;
   filters?: Array<{ namePrefix?: string; services?: string[] }>;
@@ -109,6 +108,7 @@ class BLEService {
   private onFileTransfer: FileTransferCallback | null = null;
   private onConnectionStatus: ConnectionCallback | null = null;
   private identity: BleDeviceIdentity | null = null;
+  private pendingIdentityVerification: PendingIdentityVerification | null = null;
   private shouldReconnect = false;
   private reconnectGeneration = 0;
 
@@ -176,7 +176,7 @@ class BLEService {
         { namePrefix: 'NHR-10' },
         { namePrefix: 'Nextwaves' },
       ],
-      optionalServices: [SERVICE_UUID, DEVICE_INFO_SERVICE_UUID],
+      optionalServices: [SERVICE_UUID],
     };
 
     try {
@@ -191,7 +191,7 @@ class BLEService {
       this.log('Retrying BLE request with iOS-compatible selector...', 'info');
       return nav.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [SERVICE_UUID, DEVICE_INFO_SERVICE_UUID],
+        optionalServices: [SERVICE_UUID],
       });
     }
   }
@@ -216,8 +216,6 @@ class BLEService {
     this.log(`${isReconnect ? 'Reconnecting' : 'Connecting'} to ${device.name ?? 'NHR-10'}...`, 'info');
     this.server = await device.gatt.connect();
 
-    const connectedIdentity = await this.readAndValidateIdentity(this.server, device);
-
     this.log('Getting Service...', 'info');
     this.service = await this.server.getPrimaryService(SERVICE_UUID);
 
@@ -231,7 +229,7 @@ class BLEService {
     await this.charCmd.startNotifications();
     this.charCmd.addEventListener('characteristicvaluechanged', this.boundCmdHandler);
 
-    this.identity = connectedIdentity ?? this.identity;
+    await this.requestAndValidateIdentity(device);
     this.shouldReconnect = true;
     this.log(isReconnect ? 'Reconnected and ready.' : 'Connected and ready.', 'info');
   }
@@ -274,93 +272,70 @@ class BLEService {
     this.onConnectionStatus?.('error', `BLE reconnect failed: ${lastError}`);
   }
 
-  private async readAndValidateIdentity(
-    server: BluetoothRemoteGATTServer,
-    device: BluetoothDevice,
-  ): Promise<BleDeviceIdentity | null> {
+  private async requestAndValidateIdentity(device: BluetoothDevice): Promise<void> {
+    if (this.pendingIdentityVerification) {
+      throw new Error('NHR-10 identity verification failed: another verification is already active');
+    }
+
     const advertisedName = device.name?.trim() ?? '';
-    const displayMatch = /^NHR10-([0-9A-F]{6})$/i.exec(advertisedName);
-    const advertisedDisplayId = displayMatch?.[1].toUpperCase() ?? null;
-    const isLegacyName = /^(NHR-10|Nextwaves)/i.test(advertisedName);
+    const requiresCanonicalIdentity = /^NHR10-[0-9A-F]{6}$/i.test(advertisedName) || this.identity !== null;
+    const identityPromise = new Promise<BleDeviceIdentity | null>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        if (!this.pendingIdentityVerification) return;
 
-    let model: string;
-    let serial: string;
-    let infoService: BluetoothRemoteGATTService;
+        if (requiresCanonicalIdentity) {
+          this.settleIdentityVerification(
+            null,
+            new Error('NHR-10 identity verification failed: DI response timed out'),
+          );
+          return;
+        }
+
+        this.log('Legacy device did not return a verifiable DI identity; continuing in compatibility mode.', 'info');
+        this.settleIdentityVerification(null);
+      }, IDENTITY_RESPONSE_TIMEOUT_MS);
+
+      this.pendingIdentityVerification = { resolve, reject, timeoutId };
+    });
+
     try {
-      infoService = await server.getPrimaryService(DEVICE_INFO_SERVICE_UUID);
-      // Serialize reads because several Web Bluetooth stacks reject parallel GATT operations.
-      model = await this.readGattText(infoService, MODEL_NUMBER_UUID);
-      serial = await this.readGattText(infoService, SERIAL_NUMBER_UUID);
+      await this.sendCommand({ cmd: 'DI' });
     } catch (error: any) {
-      if (isLegacyName) {
-        this.log(`Legacy device without verifiable Device Information Service: ${error.message}`, 'info');
-        return null;
+      this.settleIdentityVerification(
+        null,
+        new Error(`NHR-10 identity verification failed: unable to request DI: ${error.message}`),
+      );
+    }
+
+    await identityPromise;
+  }
+
+  private settleIdentityVerification(identity: BleDeviceIdentity | null, error?: Error): boolean {
+    const pending = this.pendingIdentityVerification;
+    if (!pending) return false;
+
+    window.clearTimeout(pending.timeoutId);
+    this.pendingIdentityVerification = null;
+    if (error) pending.reject(error);
+    else pending.resolve(identity);
+    return true;
+  }
+
+  private parseDeviceIdentityResponse(data: any): BleDeviceIdentity | null {
+    const advertisedName = this.device?.name?.trim() ?? '';
+    const requiresCanonicalIdentity = /^NHR10-[0-9A-F]{6}$/i.test(advertisedName) || this.identity !== null;
+    if (typeof data?.id !== 'string' || data.id.trim() === '') {
+      if (requiresCanonicalIdentity) {
+        throw new Error('DI response is missing Canonical ID');
       }
-      throw new Error(`NHR-10 identity verification failed: ${error.message}`);
+
+      this.log('Legacy DI response has no Canonical ID; using compatibility mode.', 'info');
+      return null;
     }
-
-    const firmware = await this.readGattTextOptional(infoService, FIRMWARE_REVISION_UUID, 'Firmware Revision');
-    const hardware = await this.readGattTextOptional(infoService, HARDWARE_REVISION_UUID, 'Hardware Revision');
-    const manufacturer = await this.readGattTextOptional(infoService, MANUFACTURER_NAME_UUID, 'Manufacturer Name');
-
-    const canonicalId = serial.trim().toUpperCase();
-    if (model.trim() !== 'NHR-10') {
-      throw new Error(`NHR-10 identity verification failed: unexpected model "${model.trim()}"`);
-    }
-    if (!/^NHR10-[0-9A-F]{12}$/.test(canonicalId)) {
-      throw new Error(`NHR-10 identity verification failed: invalid Serial Number "${serial.trim()}"`);
-    }
-
-    const displayId = canonicalId.slice(-6);
-    if (advertisedDisplayId && advertisedDisplayId !== displayId) {
-      throw new Error(`NHR-10 identity verification failed: advertised ID ${advertisedDisplayId} does not match Serial Number ${canonicalId}`);
-    }
-    if (this.identity && this.identity.canonicalId !== canonicalId) {
-      throw new Error(`NHR-10 identity verification failed: reconnected device identity changed from ${this.identity.canonicalId} to ${canonicalId}`);
-    }
-
-    this.log(`Verified device identity: ${canonicalId}`, 'info');
-    return {
-      canonicalId,
-      displayId,
-      advertisedName,
-      model: model.trim(),
-      firmware: firmware.trim(),
-      hardware: hardware.trim(),
-      manufacturer: manufacturer.trim(),
-    };
-  }
-
-  private async readGattText(
-    service: BluetoothRemoteGATTService,
-    characteristicUuid: string,
-  ): Promise<string> {
-    const characteristic = await service.getCharacteristic(characteristicUuid);
-    const value = await characteristic.readValue();
-    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-    return new TextDecoder('utf-8').decode(bytes).replace(/\0+$/g, '');
-  }
-
-  private async readGattTextOptional(
-    service: BluetoothRemoteGATTService,
-    characteristicUuid: string,
-    label: string,
-  ): Promise<string> {
-    try {
-      return await this.readGattText(service, characteristicUuid);
-    } catch (error: any) {
-      this.log(`${label} is unavailable: ${error.message}`, 'info');
-      return '';
-    }
-  }
-
-  private validateDeviceInfoResponse(data: any): boolean {
-    if (typeof data?.id !== 'string' || data.id.trim() === '') return true;
 
     const canonicalId = data.id.trim().toUpperCase();
     if (!/^NHR10-[0-9A-F]{12}$/.test(canonicalId)) {
-      this.rejectIdentity(`DI returned invalid Canonical ID "${data.id}"`);
-      return false;
+      throw new Error(`DI returned invalid Canonical ID "${data.id}"`);
     }
 
     const displayId = canonicalId.slice(-6);
@@ -368,41 +343,31 @@ class BLEService {
       ? data.display_id.trim().toUpperCase()
       : displayId;
     if (responseDisplayId !== displayId) {
-      this.rejectIdentity(`DI Display ID ${responseDisplayId} does not match ${canonicalId}`);
-      return false;
+      throw new Error(`DI Display ID ${responseDisplayId} does not match ${canonicalId}`);
     }
     if (this.identity && this.identity.canonicalId !== canonicalId) {
-      this.rejectIdentity(`DI identity ${canonicalId} does not match ${this.identity.canonicalId}`);
-      return false;
+      throw new Error(`DI identity ${canonicalId} does not match ${this.identity.canonicalId}`);
     }
 
-    const advertisedName = this.device?.name?.trim() ?? '';
     const advertisedMatch = /^NHR10-([0-9A-F]{6})$/i.exec(advertisedName);
     if (advertisedMatch && advertisedMatch[1].toUpperCase() !== displayId) {
-      this.rejectIdentity(`DI identity ${canonicalId} does not match advertised name ${advertisedName}`);
-      return false;
+      throw new Error(`DI identity ${canonicalId} does not match advertised name ${advertisedName}`);
     }
 
-    if (!this.identity) {
-      this.identity = {
-        canonicalId,
-        displayId,
-        advertisedName,
-        model: typeof data.val === 'string' ? data.val.trim() : 'NHR-10',
-        firmware: typeof data.fw === 'string' ? data.fw.trim() : '',
-        hardware: typeof data.hw === 'string' ? data.hw.trim() : '',
-        manufacturer: '',
-      };
-      this.log(`Verified legacy device identity from DI: ${canonicalId}`, 'info');
-    } else {
-      this.identity = {
-        ...this.identity,
-        firmware: typeof data.fw === 'string' && data.fw.trim() ? data.fw.trim() : this.identity.firmware,
-        hardware: typeof data.hw === 'string' && data.hw.trim() ? data.hw.trim() : this.identity.hardware,
-      };
+    const model = typeof data.val === 'string' && data.val.trim() ? data.val.trim() : 'NHR-10';
+    if (model !== 'NHR-10') {
+      throw new Error(`DI returned unexpected model "${model}"`);
     }
 
-    return true;
+    return {
+      canonicalId,
+      displayId,
+      advertisedName,
+      model,
+      firmware: typeof data.fw === 'string' ? data.fw.trim() : this.identity?.firmware ?? '',
+      hardware: typeof data.hw === 'string' ? data.hw.trim() : this.identity?.hardware ?? '',
+      manufacturer: this.identity?.manufacturer ?? '',
+    };
   }
 
   private rejectIdentity(reason: string) {
@@ -429,6 +394,10 @@ class BLEService {
   }
 
   private clearGattState() {
+    this.settleIdentityVerification(
+      null,
+      new Error('NHR-10 identity verification failed: BLE link closed before DI verification completed'),
+    );
     this.charCmd?.removeEventListener('characteristicvaluechanged', this.boundCmdHandler);
     this.charFileData?.removeEventListener('characteristicvaluechanged', this.boundFileHandler);
     this.resetFileState();
@@ -555,8 +524,25 @@ class BLEService {
     try {
       const data = JSON.parse(value);
 
-      if (data.cmd === 'DI' && !this.validateDeviceInfoResponse(data)) {
-        return;
+      if (data.cmd === 'DI') {
+        const hasPendingVerification = this.pendingIdentityVerification !== null;
+        try {
+          const identity = this.parseDeviceIdentityResponse(data);
+          if (identity) {
+            this.identity = identity;
+            this.log(`Verified device identity via DI: ${identity.canonicalId}`, 'info');
+          }
+          this.settleIdentityVerification(identity);
+        } catch (error: any) {
+          const message = String(error?.message ?? error ?? 'invalid DI response');
+          const verificationError = new Error(`NHR-10 identity verification failed: ${message}`);
+          if (hasPendingVerification) {
+            this.settleIdentityVerification(null, verificationError);
+          } else {
+            this.rejectIdentity(message);
+          }
+          return;
+        }
       }
 
       if (data.cmd === 'live_tags') {
