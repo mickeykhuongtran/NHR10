@@ -1,7 +1,8 @@
 import React from 'react';
-import { Bluetooth, BatteryFull, BatteryMedium, BatteryLow, Thermometer, Info } from 'lucide-react';
+import { Bluetooth, BatteryCharging, BatteryFull, BatteryMedium, BatteryLow, Thermometer, Info } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { ConnectionStatus, Settings } from '../../types';
+import { isBatteryCharging } from '../../utils/battery';
 import { formatDeviceDisplayName } from '../../utils/deviceIdentity';
 import logoUrl from '../../logo/nws_logo.png';
 
@@ -12,15 +13,11 @@ interface TopBarProps {
   onDisconnect: () => void;
 }
 
-const calculateBatteryPercent = (mv: number) => {
-  // If value is likely already a percentage (e.g. < 100), return it directly
-  if (mv <= 100) return mv;
-  return Math.round(Math.max(0, Math.min(100, ((mv - 6000) / (8600 - 6000)) * 100)));
-};
-
 export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onDisconnect }) => {
   const isConnected = status === 'connected';
-  const batteryPercent = calculateBatteryPercent(settings.battery);
+  const batterySnapshot = settings.batterySnapshot;
+  const hasFreshBatterySnapshot = batterySnapshot !== null && !batterySnapshot.stale;
+  const batteryPercent = hasFreshBatterySnapshot ? batterySnapshot.visualPercent : null;
   const displayDeviceName = formatDeviceDisplayName('', undefined, settings.deviceInfo) || 'NHR-10';
   const canonicalDeviceId = settings.deviceCanonicalId.trim();
   const deviceIdentityHint = canonicalDeviceId
@@ -34,14 +31,40 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
         ? 'CONNECTION ERROR'
         : 'OFFLINE';
 
-  const getBatteryIcon = (percent: number) => {
-    if (percent > 80) return BatteryFull;
-    if (percent > 30) return BatteryMedium;
+  const getBatteryIcon = (percent: number | null) => {
+    if (percent !== null && percent >= 80) return BatteryFull;
+    if (percent !== null && percent >= 40) return BatteryMedium;
     return BatteryLow;
   };
 
-  const BatteryIcon = getBatteryIcon(batteryPercent);
-  const isBatteryCritical = settings.batteryState === 'critical' || settings.batteryState === 'warning';
+  const charging = hasFreshBatterySnapshot && isBatteryCharging(batterySnapshot.chargePhase);
+  const BatteryIcon = charging ? BatteryCharging : getBatteryIcon(batteryPercent);
+  const isBatteryCritical = batterySnapshot?.protectionState === 'critical' ||
+    batterySnapshot?.protectionState === 'warning' ||
+    batterySnapshot?.protectionState === 'shutdown';
+  const batteryColorClass = !hasFreshBatterySnapshot
+    ? 'text-[#8E8E93]'
+    : isBatteryCritical
+      ? 'text-[#FF3B30]'
+      : batterySnapshot.voltageMv <= 7000
+        ? 'text-[#FF3B30]'
+        : batterySnapshot.voltageMv <= 7400
+          ? 'text-[#FF9500]'
+          : batterySnapshot.voltageMv <= 7700
+            ? 'text-[#C9A400]'
+            : batterySnapshot.voltageMv <= 8000
+              ? 'text-[#83B900]'
+              : 'text-[#34C759]';
+  const batteryTitle = batterySnapshot
+    ? [
+        `Battery gauge: ${batterySnapshot.visualPercent}%`,
+        `${batterySnapshot.voltageMv} mV`,
+        batterySnapshot.protectionState.toUpperCase(),
+        batterySnapshot.loadState,
+        batterySnapshot.chargePhase ? `Charge: ${batterySnapshot.chargePhase}` : undefined,
+        batterySnapshot.stale ? 'STALE' : undefined,
+      ].filter(Boolean).join(' · ')
+    : 'Battery snapshot unavailable';
 
   return (
     <div 
@@ -79,10 +102,14 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
         {/* Telemetry */}
         {isConnected && (
           <>
-            <div className="flex items-center gap-1.5 text-[#6E6E73]" title="Battery Level">
-              <BatteryIcon size={14} className={isBatteryCritical ? 'text-[#FF3B30]' : 'text-[#34C759]'} />
-              <span className={`font-mono text-xs font-medium ${isBatteryCritical ? 'text-[#FF3B30]' : 'text-[#424245]'}`}>
-                {batteryPercent}%
+            <div
+              className="flex items-center gap-1.5 text-[#6E6E73]"
+              title={batteryTitle}
+              aria-label={batteryTitle}
+            >
+              <BatteryIcon size={14} className={batteryColorClass} />
+              <span className={`font-mono text-xs font-medium ${batteryColorClass}`}>
+                {batteryPercent !== null ? `${batteryPercent}%` : '--%'}
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-[#6E6E73]" title="Device Temperature">

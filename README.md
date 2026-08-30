@@ -166,6 +166,7 @@ The Settings tab reads and writes reader configuration:
 │   ├── useLocateLogic.ts
 │   └── useFileTransfer.ts
 ├── utils/
+│   ├── battery.ts
 │   └── nhrbParser.ts
 ├── components/
 │   └── dashboard/
@@ -175,10 +176,11 @@ The Settings tab reads and writes reader configuration:
 Module roles:
 
 - `services/bleService.ts`: BLE transport/protocol layer. It owns UUIDs, characteristics, connection flow, command sending, and notification parsing.
-- `hooks/useRFIDConnection.ts`: connected/disconnected state, settings, battery heartbeat, telemetry.
+- `hooks/useRFIDConnection.ts`: connected/disconnected state, settings, battery snapshots, telemetry.
 - `hooks/useScanLogic.ts`: interactive scan, batch scan, live tag map, statistics, stop burst.
 - `hooks/useLocateLogic.ts`: locate state and RSSI response handling.
 - `hooks/useFileTransfer.ts`: file request, transfer progress, busy retry, NHRB parsing.
+- `utils/battery.ts`: validates `GB` telemetry and derives the shared relative battery gauge.
 - `utils/nhrbParser.ts`: batch file parser, independent from React.
 - `App.tsx`: connects `bleService` callbacks to hooks and protects operation mode routing.
 - `components/`: current UI. This can be replaced completely in another app.
@@ -220,8 +222,8 @@ Meaning:
 | Mode | Reader activity | App accepts |
 |---|---|---|
 | `idle` | No inventory | Settings, battery, temperature |
-| `interactive` | Realtime scan | `live_tags`, battery heartbeat |
-| `batch` | Device-side batch inventory | Status, slower battery heartbeat |
+| `interactive` | Realtime scan | `live_tags`, battery snapshots |
+| `batch` | Device-side batch inventory | Status, slower battery polling |
 | `batchSaving` | Reader is saving batch data | Avoid dense polling, wait for save completion |
 | `locate` | Target EPC search | `F` response with RSSI |
 
@@ -330,8 +332,33 @@ If an `FF01` notification starts with byte `{` (`0x7B`), the app decodes it as U
 Example:
 
 ```json
-{ "cmd": "GB", "voltage": 3.9, "state": "normal" }
+{"cmd":"GB","voltage":7920,"state":"NORMAL","load":"idle","chg":"fast CC","vbus":9008,"ibat":846,"pd_v":9000,"pd_i":2000,"fault":0}
 ```
+
+The app keeps `voltage` as integer pack millivolts and normalizes the protection
+state only for internal comparison. Charger fields are optional because the
+firmware can send either the extended response, the compact response, or
+`"chg":"unknown"` when fresh charger telemetry is unavailable.
+
+The displayed percentage is a relative five-zone gauge, not measured state of
+charge. `utils/battery.ts` interpolates 20% within each adjacent pair of bounds:
+
+```text
+6000, 7000, 7400, 7700, 8000, 8400 mV
+  0%,  20%,  40%,  60%,  80%, 100%
+```
+
+The client polls `GB` no faster than once every five seconds because firmware
+refreshes its slow UI/BLE battery value on that cadence. A mode transition uses
+the next eligible poll. Any unsolicited `GB`, including warning and shutdown
+notifications, replaces the current snapshot. On disconnect or battery timeout,
+the last snapshot is retained with `stale: true`; it is never replaced with 0 V
+or 0%.
+
+Web Bluetooth does not expose an API for explicitly requesting ATT MTU 185. The
+browser and operating system negotiate the MTU; deployments must verify that the
+resulting notification payload can carry at least the firmware's compact `GB`
+response.
 
 ### 9.2 Binary live_tags
 

@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { bleService } from '../services/bleService';
 import { ConnectionStatus, Settings, LogEntry, SettingsSyncRevision } from '../types';
+import { parseBatterySnapshot } from '../utils/battery';
 import { formatDeviceDisplayName } from '../utils/deviceIdentity';
 
-const IDLE_BATTERY_POLL_INTERVAL_MS = 2000;
-const IDLE_BATTERY_TIMEOUT_MS = 6000;
-const SCAN_NO_TAGS_BATTERY_POLL_INTERVAL_MS = 3000;
+const IDLE_BATTERY_POLL_INTERVAL_MS = 5000;
+const IDLE_BATTERY_TIMEOUT_MS = 15000;
+const SCAN_NO_TAGS_BATTERY_POLL_INTERVAL_MS = 5000;
 const SCAN_LIVE_TAGS_BATTERY_POLL_INTERVAL_MS = 5000;
 const BATCH_BATTERY_POLL_INTERVAL_MS = 10000;
 const BATCH_BATTERY_TIMEOUT_MS = 30000;
-const SCAN_ACTIVITY_TIMEOUT_MS = 9000;
+const SCAN_ACTIVITY_TIMEOUT_MS = 15000;
 const HEARTBEAT_CHECK_INTERVAL_MS = 500;
 const TEMPERATURE_POLL_INTERVAL_MS = 5000;
 
@@ -100,8 +101,7 @@ export const useRFIDConnection = () => {
     scanParams: { interval: 0, dwell: 0, count: 0 },
     version: '1.0.0',
     temperature: 0,
-    battery: 0,
-    batteryState: 'normal',
+    batterySnapshot: null,
     deviceInfo: '',
     deviceCanonicalId: '',
     syncRevision: createSettingsSyncRevision(),
@@ -119,8 +119,9 @@ export const useRFIDConnection = () => {
   const clearDeviceTelemetry = useCallback(() => {
     setSettings(s => ({
       ...s,
-      battery: 0,
-      batteryState: 'normal',
+      batterySnapshot: s.batterySnapshot
+        ? { ...s.batterySnapshot, stale: true }
+        : null,
       temperature: 0,
       deviceInfo: '',
       deviceCanonicalId: '',
@@ -148,7 +149,11 @@ export const useRFIDConnection = () => {
   }, []);
 
   const markBatteryHeartbeat = useCallback(() => {
-    lastBatteryHeartbeatRef.current = Date.now();
+    const now = Date.now();
+    lastBatteryHeartbeatRef.current = now;
+    // Anchor the next poll to the received snapshot as well as to the write.
+    // This keeps every GB exchange at least one firmware refresh period apart.
+    lastBatteryPollAtRef.current = now;
     markDeviceActivity('GB');
   }, [markDeviceActivity]);
 
@@ -214,12 +219,13 @@ export const useRFIDConnection = () => {
     }
     if (data.cmd === 'GT') setSettings(s => ({ ...s, temperature: data.val }));
     if (data.cmd === 'GB') {
-        markBatteryHeartbeat();
         setStatus(current => current === 'connecting' ? 'connected' : current);
-        if (data.voltage !== undefined) {
-            setSettings(s => ({ ...s, battery: data.voltage, batteryState: data.state }));
+        const batterySnapshot = parseBatterySnapshot(data);
+        if (batterySnapshot) {
+            markBatteryHeartbeat();
+            setSettings(s => ({ ...s, batterySnapshot }));
         } else {
-            setSettings(s => ({ ...s, battery: data.val }));
+            addLog('Ignored malformed GB battery response', 'error');
         }
     }
     if (data.cmd === 'GP' || data.cmd === 'SP') {
@@ -290,7 +296,7 @@ export const useRFIDConnection = () => {
             setSettings(prev => ({ ...prev, regionBand, syncRevision: bumpSettingsSyncRevision(prev, 'regionBand') }));
         }
     }
-  }, [markBatteryHeartbeat, markDeviceActivity]);
+  }, [addLog, markBatteryHeartbeat, markDeviceActivity]);
 
   const handleConnectionStatusChange = useCallback((nextStatus: ConnectionStatus, reason?: string) => {
     if (nextStatus === 'connecting') {
@@ -303,7 +309,8 @@ export const useRFIDConnection = () => {
       lastBatteryHeartbeatRef.current = connectedAt;
       lastDeviceActivityRef.current = connectedAt;
       lastLiveTagsAtRef.current = null;
-      lastBatteryPollAtRef.current = 0;
+      // getSettings() below already queues one GB request for the reconnect.
+      lastBatteryPollAtRef.current = connectedAt;
       heartbeatTimeoutReportedRef.current = false;
       setStatus('connected');
       void bleService.getSettings().catch((error: any) => {
@@ -339,6 +346,8 @@ export const useRFIDConnection = () => {
       const connectedAt = Date.now();
       lastBatteryHeartbeatRef.current = connectedAt;
       lastDeviceActivityRef.current = connectedAt;
+      // The initialization sequence below explicitly requests one GB snapshot.
+      lastBatteryPollAtRef.current = connectedAt;
       const identity = bleService.getDeviceIdentity();
       const deviceLabel = formatDeviceDisplayName(
         bleService.getDeviceName(),
@@ -359,6 +368,7 @@ export const useRFIDConnection = () => {
       // Init Settings
       await bleService.getDeviceInfo();
       await bleService.getInfo();
+      lastBatteryPollAtRef.current = Date.now();
       await bleService.getBattery();
       await bleService.getPower();
       await bleService.getProfile();
@@ -407,8 +417,8 @@ export const useRFIDConnection = () => {
     return hasRecentLiveTags ? SCAN_LIVE_TAGS_BATTERY_POLL_INTERVAL_MS : SCAN_NO_TAGS_BATTERY_POLL_INTERVAL_MS;
   }, []);
 
-  // Adaptive heartbeat. During inventory, live_tags/FF01 traffic counts as device activity
-  // and GB is throttled to avoid stressing BLE while tag traffic is dense.
+  // GB follows the firmware's five-second slow-filter cadence. Batch mode polls
+  // less often, and batch saving suspends polling to protect the transfer path.
   useEffect(() => {
     let heartbeatPollId: number | null = null;
     let temperaturePollId: number | null = null;
@@ -420,9 +430,6 @@ export const useRFIDConnection = () => {
         void bleService.getBattery().catch(e => console.error("Battery poll failed", e));
       };
 
-      if (getBatteryPollInterval() !== null) {
-        pollBattery();
-      }
       heartbeatPollId = window.setInterval(() => {
         const batteryPollInterval = getBatteryPollInterval();
         if (batteryPollInterval !== null && Date.now() - lastBatteryPollAtRef.current >= batteryPollInterval) {
@@ -453,25 +460,21 @@ export const useRFIDConnection = () => {
         return;
       }
 
-      if (mode === 'batch') {
-        const lastHeartbeat = lastBatteryHeartbeatRef.current;
-        if (!lastHeartbeat || now - lastHeartbeat > BATCH_BATTERY_TIMEOUT_MS) {
-          markDeviceOffline('Device offline: no batch battery update for 30s');
-        }
-        return;
-      }
-
-      if (inventoryActiveRef.current) {
-        const lastActivity = lastDeviceActivityRef.current;
-        if (!lastActivity || now - lastActivity > SCAN_ACTIVITY_TIMEOUT_MS) {
-          markDeviceOffline('Device offline: no FF01 activity for 9s');
-        }
-        return;
-      }
-
       const lastHeartbeat = lastBatteryHeartbeatRef.current;
-      if (!lastHeartbeat || now - lastHeartbeat > IDLE_BATTERY_TIMEOUT_MS) {
-        markDeviceOffline('Device offline: no battery update for 6s');
+      const batteryTimeoutMs = mode === 'batch' ? BATCH_BATTERY_TIMEOUT_MS : IDLE_BATTERY_TIMEOUT_MS;
+      if (!lastHeartbeat || now - lastHeartbeat > batteryTimeoutMs) {
+        setSettings(current => {
+          const snapshot = current.batterySnapshot;
+          if (!snapshot || snapshot.stale) return current;
+          return { ...current, batterySnapshot: { ...snapshot, stale: true } };
+        });
+      }
+
+      const activityTimeoutMs = mode === 'batch' ? BATCH_BATTERY_TIMEOUT_MS : SCAN_ACTIVITY_TIMEOUT_MS;
+      const lastActivity = lastDeviceActivityRef.current;
+      if (!lastActivity || now - lastActivity > activityTimeoutMs) {
+        const context = mode === 'batch' ? 'batch' : inventoryActiveRef.current ? 'scan' : 'idle';
+        markDeviceOffline(`Device offline: no FF01 activity in ${context} mode for ${activityTimeoutMs / 1000}s`);
       }
     }, HEARTBEAT_CHECK_INTERVAL_MS);
 
