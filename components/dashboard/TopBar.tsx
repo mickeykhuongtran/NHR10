@@ -18,7 +18,7 @@ export const TopBar: React.FC<TopBarProps> = ({ status, settings, onConnect, onD
   const batterySnapshot = settings.batterySnapshot;
   const hasFreshBatterySnapshot = batterySnapshot !== null && !batterySnapshot.stale;
   const batteryPercent = hasFreshBatterySnapshot ? batterySnapshot.visualPercent : null;
-  const displayDeviceName = formatDeviceDisplayName('', undefined, settings.deviceInfo) || 'NHR-10';
+  const displayDeviceName = settings.deviceName || formatDeviceDisplayName('', undefined, settings.deviceInfo) || 'NHR-10';
   const canonicalDeviceId = settings.deviceCanonicalId.trim();
   const deviceIdentityHint = canonicalDeviceId
     ? `${displayDeviceName} · Canonical ID: ${canonicalDeviceId}`

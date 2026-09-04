@@ -26,6 +26,13 @@ export const formatDeviceDisplayName = (
     return `NHR10-${advertisedDisplayMatch[1].toUpperCase()}`;
   }
 
+  // A user-configured advertising name no longer encodes the display ID. Show
+  // it as advertised while Canonical ID verification remains a separate DI
+  // concern. Exact historical names still use the compact display-ID fallback.
+  if (advertised && !/^(?:NHR-10|Nextwaves(?:_Scanner_V3)?)$/i.test(advertised)) {
+    return advertised;
+  }
+
   // A verified DI display_id is more trustworthy than an unrecognised or
   // padded advertising label and guarantees a compact, stable UI name.
   if (/^[0-9A-F]{6}$/.test(normalizedDisplayId)) {

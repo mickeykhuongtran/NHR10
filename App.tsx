@@ -152,6 +152,24 @@ const handleDataReceived = useCallback((data: any) => {
     if (data.cmd === 'GF' && data.status === 'err') {
       connection.addLog(`Region Band read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
     }
+
+    if (data.cmd === 'SDN') {
+      const status = String(data.status ?? '').toLowerCase();
+      if (status === 'err' || status === 'error' || data.ok === false) {
+        connection.addLog(`Bluetooth name update failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
+      } else {
+        connection.addLog('Bluetooth name saved; disconnect to publish it in the next advertising cycle', 'info');
+        // Re-read the persisted value instead of trusting an optimistic UI update.
+        void bleService.getConfiguredDeviceName().catch((error) => connection.addLog(`Device name sync failed: ${error.message}`, 'error'));
+      }
+    }
+
+    if (data.cmd === 'GDN') {
+      const status = String(data.status ?? '').toLowerCase();
+      if (status === 'err' || status === 'error' || data.ok === false) {
+        connection.addLog(`Bluetooth name read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
+      }
+    }
   }, [connection, scan, locate, markBatchSaving, clearBatchSaving]);
 
   useEffect(() => {

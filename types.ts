@@ -29,6 +29,7 @@ export interface Tag {
 }
 
 export interface SettingsSyncRevision {
+  deviceName: number;
   power: number;
   linkProfile: number;
   qSession: number;
@@ -108,6 +109,8 @@ export interface Settings {
   batterySnapshot: BatterySnapshot | null;
   /** Short, human-readable name shown in the UI (for example NHR10-8658A8). */
   deviceInfo: string;
+  /** Exact UTF-8 GAP/advertising name returned by GDN. */
+  deviceName: string;
   /** Full identity verified from the firmware DI response; never used as the primary label. */
   deviceCanonicalId: string;
   regionBand?: RegionBandConfig;

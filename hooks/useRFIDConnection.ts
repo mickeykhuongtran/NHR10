@@ -3,6 +3,7 @@ import { bleService } from '../services/bleService';
 import { ConnectionStatus, Settings, LogEntry, SettingsSyncRevision } from '../types';
 import { parseBatterySnapshot } from '../utils/battery';
 import { formatDeviceDisplayName } from '../utils/deviceIdentity';
+import { validateBleDeviceName } from '../utils/deviceName';
 
 const IDLE_BATTERY_POLL_INTERVAL_MS = 5000;
 const IDLE_BATTERY_TIMEOUT_MS = 15000;
@@ -63,6 +64,7 @@ type InventoryMode = 'idle' | 'interactive' | 'batch' | 'batchSaving' | 'locate'
 type SettingsSyncKey = keyof SettingsSyncRevision;
 
 const createSettingsSyncRevision = (): SettingsSyncRevision => ({
+  deviceName: 0,
   power: 0,
   linkProfile: 0,
   qSession: 0,
@@ -103,6 +105,7 @@ export const useRFIDConnection = () => {
     temperature: 0,
     batterySnapshot: null,
     deviceInfo: '',
+    deviceName: '',
     deviceCanonicalId: '',
     syncRevision: createSettingsSyncRevision(),
   });
@@ -124,6 +127,7 @@ export const useRFIDConnection = () => {
         : null,
       temperature: 0,
       deviceInfo: '',
+      deviceName: '',
       deviceCanonicalId: '',
     }));
   }, []);
@@ -200,10 +204,31 @@ export const useRFIDConnection = () => {
         if (deviceName) {
             setSettings(s => ({
                 ...s,
-                deviceInfo: deviceName,
+                deviceInfo: s.deviceName || deviceName,
                 deviceCanonicalId: canonicalId,
                 ...(typeof data.fw === 'string' && data.fw.trim() ? { version: data.fw.trim() } : {}),
             }));
+        }
+    }
+    const deviceNameResponseIsError = ['err', 'error'].includes(String(data.status ?? '').toLowerCase()) || data.ok === false;
+    if (
+        (data.cmd === 'GDN' && !deviceNameResponseIsError) ||
+        (data.cmd === 'SDN' && !deviceNameResponseIsError && typeof data.val === 'string')
+    ) {
+        if (typeof data.val !== 'string') {
+            addLog(`${data.cmd} response is missing string val`, 'error');
+        } else {
+            const validation = validateBleDeviceName(data.val);
+            if (!validation.valid) {
+                addLog(`Ignored invalid ${data.cmd} device name: ${validation.error}`, 'error');
+            } else {
+                setSettings(s => ({
+                    ...s,
+                    deviceName: data.val,
+                    deviceInfo: data.val,
+                    syncRevision: bumpSettingsSyncRevision(s, 'deviceName'),
+                }));
+            }
         }
     }
     if (data.cmd === 'GRI') {
@@ -367,6 +392,7 @@ export const useRFIDConnection = () => {
       
       // Init Settings
       await bleService.getDeviceInfo();
+      await bleService.getConfiguredDeviceName();
       await bleService.getInfo();
       lastBatteryPollAtRef.current = Date.now();
       await bleService.getBattery();

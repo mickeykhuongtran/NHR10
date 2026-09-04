@@ -1,4 +1,5 @@
 import { ConnectionStatus } from '../types';
+import { assertValidBleDeviceName } from '../utils/deviceName';
 
 // --- Web Bluetooth Type Definitions ---
 interface BluetoothDevice extends EventTarget {
@@ -359,7 +360,7 @@ class BLEService {
     }
 
     const advertisedName = device.name?.trim() ?? '';
-    const requiresCanonicalIdentity = /^NHR10-[0-9A-F]{6}$/i.test(advertisedName) || this.identity !== null;
+    const requiresCanonicalIdentity = this.requiresCanonicalIdentity(advertisedName);
     const identityPromise = new Promise<BleDeviceIdentity | null>((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         if (!this.pendingIdentityVerification) return;
@@ -404,7 +405,7 @@ class BLEService {
 
   private parseDeviceIdentityResponse(data: any): BleDeviceIdentity | null {
     const advertisedName = this.device?.name?.trim() ?? '';
-    const requiresCanonicalIdentity = /^NHR10-[0-9A-F]{6}$/i.test(advertisedName) || this.identity !== null;
+    const requiresCanonicalIdentity = this.requiresCanonicalIdentity(advertisedName);
     if (typeof data?.id !== 'string' || data.id.trim() === '') {
       if (requiresCanonicalIdentity) {
         throw new Error('DI response is missing Canonical ID');
@@ -449,6 +450,15 @@ class BLEService {
       hardware: typeof data.hw === 'string' ? data.hw.trim() : this.identity?.hardware ?? '',
       manufacturer: this.identity?.manufacturer ?? '',
     };
+  }
+
+  private requiresCanonicalIdentity(advertisedName: string): boolean {
+    if (this.identity !== null) return true;
+
+    // A configured GAP name no longer carries the NHR10-xxxxxx suffix. Keep
+    // DI mandatory for custom/service-selected devices; compatibility mode is
+    // reserved for the explicitly supported legacy advertising families.
+    return !/^(?:NHR-10|Nextwaves(?:_Scanner_V3)?)$/i.test(advertisedName);
   }
 
   private rejectIdentity(reason: string) {
@@ -1067,6 +1077,13 @@ class BLEService {
   // --- Command Helpers ---
 
   async getDeviceInfo() { return this.sendCommand({ cmd: 'DI' }); }
+  async getConfiguredDeviceName() { return this.sendCommand({ cmd: 'GDN' }); }
+  async setConfiguredDeviceName(name: string) {
+    assertValidBleDeviceName(name);
+    // Passing an object to JSON.stringify in sendCommand preserves quotes,
+    // backslashes, and other legal JSON characters without manual escaping.
+    return this.sendCommand({ cmd: 'SDN', val: name });
+  }
   async getInfo() { return this.sendCommand({ cmd: 'GRI' }); }
   async getPower() { return this.sendCommand({ cmd: 'GP' }); }
   async getProfile() { return this.sendCommand({ cmd: 'GLP' }); }
@@ -1206,6 +1223,7 @@ class BLEService {
   async getSettings(): Promise<void> {
     // These will be queued automatically by sendCommand
     await this.sendCommand({ cmd: 'DI' });
+    await this.sendCommand({ cmd: 'GDN' });
     await this.sendCommand({ cmd: 'GRI' });
     await this.sendCommand({ cmd: 'GB' });
     await this.sendCommand({ cmd: 'GT' });

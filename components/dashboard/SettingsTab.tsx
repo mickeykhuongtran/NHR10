@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 import { RegionBandSelection, Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
 import { PageHeader } from './PageHeader';
+import { BLE_DEVICE_NAME_MAX_BYTES, validateBleDeviceName } from '../../utils/deviceName';
 
 interface SettingsTabProps {
   isConnected: boolean;
@@ -286,6 +287,7 @@ const RegionSelectField = ({
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings, onSaveConfig, onShowPopup }) => {
   const [power, setPower] = useState(settings.power);
+  const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
   const [qValue, setQValue] = useState(settings.qValue);
   const [session, setSession] = useState(settings.session);
@@ -307,6 +309,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
   const settingsActionAtRef = useRef(0);
   const activeActionTimerRef = useRef<number | null>(null);
   const powerSyncRevision = settings.syncRevision?.power ?? 0;
+  const deviceNameSyncRevision = settings.syncRevision?.deviceName ?? 0;
   const profileSyncRevision = settings.syncRevision?.linkProfile ?? 0;
   const qSessionSyncRevision = settings.syncRevision?.qSession ?? 0;
   const queryParamsSyncRevision = settings.syncRevision?.queryParams ?? 0;
@@ -316,6 +319,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
   useEffect(() => {
     setPower(settings.power);
   }, [settings.power, powerSyncRevision]);
+
+  useEffect(() => {
+    setDeviceName(settings.deviceName);
+  }, [deviceNameSyncRevision, settings.deviceName]);
 
   useEffect(() => {
     setProfile(normalizeProfileValue(settings.linkProfile));
@@ -363,6 +370,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
 
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
+  const handleGetDeviceName = () => bleService.getConfiguredDeviceName();
+  const handleSetDeviceName = () => bleService.setConfiguredDeviceName(deviceName);
   const handleGetProfile = () => bleService.getProfile();
   const handleSetProfile = () => bleService.setLinkProfile(profile);
   const handleGetQSession = () => bleService.getQSession();
@@ -390,6 +399,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
     }
     return '';
   }, [customCount, customEndKHz, customSpace, customStartKHz]);
+  const deviceNameValidation = useMemo(() => validateBleDeviceName(deviceName), [deviceName]);
   const handleRegionChange = (value: RegionBandSelection) => {
     setRegionSelection(value);
     if (value === 'Custom') {
@@ -532,6 +542,41 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
             </button>
           </div>
           <ActionRow id="power" onGet={handleGetPower} onSet={handleSetPower} />
+        </SettingsCard>
+
+        <SettingsCard
+          actionId="device-name"
+          activeActionKey={activeActionKey}
+          title="Bluetooth Device Name"
+          subtitle="GAP + advertising · persistent"
+          className="xl:col-span-2"
+        >
+          <div>
+            <FieldLabel>Name</FieldLabel>
+            <input
+              type="text"
+              value={deviceName}
+              onChange={(event) => setDeviceName(event.target.value)}
+              aria-invalid={!deviceNameValidation.valid}
+              autoComplete="off"
+              spellCheck={false}
+              className={`${FIELD_CLASS} font-mono ${!deviceNameValidation.valid ? 'border-[#FF3B30]/60' : ''}`}
+            />
+            <div className="mt-1.5 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-[10px] font-semibold">
+              <span className={deviceNameValidation.valid ? 'text-[#527176]' : 'text-[#C32118]'}>
+                {deviceNameValidation.error ?? 'Applied after disconnect and the next advertising cycle'}
+              </span>
+              <span className={`shrink-0 font-mono ${deviceNameValidation.byteLength > BLE_DEVICE_NAME_MAX_BYTES ? 'text-[#C32118]' : 'text-[#527176]'}`}>
+                {deviceNameValidation.byteLength}/{BLE_DEVICE_NAME_MAX_BYTES} UTF-8 bytes
+              </span>
+            </div>
+          </div>
+          <ActionRow
+            id="device-name"
+            onGet={handleGetDeviceName}
+            onSet={handleSetDeviceName}
+            setDisabled={!deviceNameValidation.valid}
+          />
         </SettingsCard>
 
         <SettingsCard

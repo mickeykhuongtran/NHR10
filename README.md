@@ -53,10 +53,10 @@ npm run lint
 1. Open the web app.
 2. Press `Connect`.
 3. The browser opens the Bluetooth device picker.
-4. Select the device whose advertised name is `NHR10-XXXXXX`; `XXXXXX` must match the Display ID shown by the handheld. Legacy `NHR-10` and `Nextwaves` names remain supported during migration.
+4. Select the device by its configured advertising name. A factory/default unit uses `NHR10-XXXXXX`; legacy `NHR-10` and `Nextwaves` names remain supported during migration.
 5. The app connects to GATT, gets service `FF`, discovers characteristics `FF01`, `FF02`, and `FF03`, and starts notifications on `FF01`.
-6. The web client issues `DI` over `FF01` and verifies that its Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits) matches the six-digit advertised device name. It does not read Device Information Serial Number `0x2A25`, which Web Bluetooth blocklists for privacy.
-7. Only after identity verification succeeds does the app mark the transport ready and read the initial reader state: firmware, battery, power, link profile, Q/session, query params, Tag Focus, region, and temperature.
+6. The web client issues `DI` over `FF01` and verifies its Canonical ID (`NHR10-` plus 12 hexadecimal MAC digits). For a default `NHR10-XXXXXX` name it also verifies the six-digit suffix; a configured free-form name remains separate from identity. It does not read Device Information Serial Number `0x2A25`, which Web Bluetooth blocklists for privacy.
+7. Only after identity verification succeeds does the app mark the transport ready and read the initial reader state: configured Bluetooth name, firmware, battery, power, link profile, Q/session, query params, Tag Focus, region, and temperature.
 
 After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes five bounded reconnect attempts (0.5 s, 1 s, 2 s, 4 s, and 8 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity through `DI`, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
 
@@ -145,6 +145,7 @@ The Settings tab reads and writes reader configuration:
 
 | Setting | Read command | Set command | Notes |
 |---|---|---|---|
+| Bluetooth device name | `GDN` | `SDN` | Persistent GAP/advertising name, 1–14 UTF-8 bytes |
 | RF output power | `GP` | `SP` | dBm value |
 | RF link profile | `GLP` | `SLP` | Example profiles: 11/13/53 |
 | Q/session | `GQS` | `SQS` | EPC Gen2 singulation parameters |
@@ -306,7 +307,8 @@ Main commands:
 
 | Command | Purpose |
 |---|---|
-| `DI` | Read device info/name |
+| `DI` | Read immutable device identity and firmware info |
+| `GDN` / `SDN` | Get/set the persistent GAP and advertising device name |
 | `GRI` | Read firmware/info |
 | `GB` | Read battery |
 | `GT` | Read temperature |
@@ -322,6 +324,21 @@ Main commands:
 | `WD` | Write memory bank |
 | `POPUP` | Show popup on reader |
 | `SAVE` | Save configuration |
+
+### 8.1 Bluetooth device name
+
+The Settings tab reads the configured name with `{"cmd":"GDN"}` and writes it
+with `{"cmd":"SDN","val":"HANDHELD KHO A"}`. The client accepts exactly
+1–14 UTF-8 bytes (excluding the firmware's trailing NUL), rejects malformed
+Unicode and C0/C1 control characters, and uses `JSON.stringify` so quotes and
+backslashes are escaped correctly.
+
+After an `SDN` acknowledgement, the client issues `GDN` again and treats that
+response as authoritative. Firmware is responsible for committing the value to
+NVS, applying it to both the GAP Device Name and advertising payload, and
+publishing it when advertising restarts after disconnect. `SDN` never changes
+the `DI` Canonical ID/MAC. Device discovery continues to work with arbitrary
+configured names because the primary picker filter uses the custom service UUID.
 
 ## 9. Notification Protocol
 
