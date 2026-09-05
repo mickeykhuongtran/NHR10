@@ -7,9 +7,9 @@ import { PageHeader } from './PageHeader';
 import { BatchSaveInfo, ScanStats, Tag } from '../../types';
 
 const PRESETS = [
-  { mode: 'standard', label: 'Standard', detail: 'General inventory · Profile 53, Q4, S1, Tag Focus on' },
-  { mode: 'quick', label: 'Quick', detail: 'Small tag groups · Profile 11, Q2, S0, Tag Focus off' },
-  { mode: 'deep', label: 'Deep', detail: 'Alternative RF link · Profile 13, Q4, S1, Tag Focus on' },
+  { mode: 'standard', label: 'Standard', purpose: 'Everyday inventory and general tag reading. Start here for routine scans.', detail: 'Profile 53, Q4, S1, Tag Focus on' },
+  { mode: 'quick', label: 'Quick', purpose: 'Small groups of nearby tags, with an emphasis on quick, repeated reads.', detail: 'Profile 11, Q2, S0, Tag Focus off' },
+  { mode: 'deep', label: 'Deep', purpose: 'Try an alternative RF link when tags are difficult to read or reads are intermittent.', detail: 'Profile 13, Q4, S1, Tag Focus on' },
 ] as const;
 type Preset = typeof PRESETS[number]['mode'];
 
@@ -179,7 +179,16 @@ export const ScannerTab: React.FC<ScannerTabProps> = (props) => {
       <details className="rounded-lg border border-slate-200 bg-white">
         <summary className="px-4 py-3 text-sm font-medium text-slate-600">Scan options <span className="ml-2 text-xs font-normal text-slate-400">Profiles & display filters</span></summary>
         <div className="space-y-4 border-t border-slate-100 p-4">
-          <fieldset disabled={locked || props.isScanning}><legend className="mb-2 text-sm font-medium">RF profile</legend><div className="flex flex-wrap gap-2">{PRESETS.map(p => <Button key={p.mode} variant={preset === p.mode ? 'primary' : 'outline'} aria-pressed={preset === p.mode} onClick={() => void run(async () => { await props.onApplyPreset(p.mode); setPreset(p.mode); })}>{p.label}</Button>)}</div><p className="mt-2 text-xs text-slate-500">{PRESETS.find(p => p.mode === preset)?.detail ?? 'Current device settings are used until you apply a profile.'}</p></fieldset>
+          <fieldset disabled={locked || props.isScanning}>
+            <legend className="mb-2 text-sm font-medium">RF profile</legend>
+            <div className="grid gap-2 md:grid-cols-3">{PRESETS.map(p => <button type="button" key={p.mode} aria-label={p.label} aria-describedby={`profile-${p.mode}-purpose`} aria-pressed={preset === p.mode}
+              className={`rounded-lg border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${preset === p.mode ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white enabled:hover:border-blue-300 enabled:hover:bg-slate-50'}`}
+              onClick={() => void run(async () => { await props.onApplyPreset(p.mode); setPreset(p.mode); })}>
+              <span className={`block text-sm font-semibold ${preset === p.mode ? 'text-blue-700' : 'text-slate-800'}`}>{p.label}</span>
+              <span id={`profile-${p.mode}-purpose`} className="mt-1 block text-xs font-normal leading-5 text-slate-500">{p.purpose}</span>
+            </button>)}</div>
+            <p className="mt-2 text-xs leading-5 text-slate-500">{preset ? `${PRESETS.find(p => p.mode === preset)!.label} · ${PRESETS.find(p => p.mode === preset)!.detail}` : 'Select a profile to apply it. Until then, the current device settings are used.'}</p>
+          </fieldset>
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={props.removeStaleTags} onChange={e => props.onChangeRemoveStaleTags(e.target.checked)} />Hide tags not seen for</label>
             <input aria-label="Hide stale tags after milliseconds" className="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm" type="number" min={100} max={60000} step={100} disabled={!props.removeStaleTags} value={timeoutInput} onChange={e => setTimeoutInput(e.target.value)} onBlur={() => { const value = Math.max(100, Math.min(60000, Number(timeoutInput) || props.staleRemoveMs)); props.onChangeStaleRemoveMs(value); setTimeoutInput(String(value)); }} /><span className="text-xs text-slate-500">ms (100–60,000)</span>

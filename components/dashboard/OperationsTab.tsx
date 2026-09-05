@@ -9,7 +9,6 @@ interface OperationsTabProps {
   isConnected: boolean;
   isBusy: boolean;
   tags: Tag[];
-  onOpenScanner: () => void;
   onWriteEpc: (targetEpc: string, newEpc: string, password?: string) => void;
   onWriteData: (epc: string, mem: number, ptr: number, data: string, password?: string) => void;
   writeStatus: 'idle' | 'pending' | 'success' | 'error';
@@ -18,7 +17,7 @@ const hexWords = (value: string) => /^[0-9A-F]+$/i.test(value) && value.length %
 const validPassword = (value: string) => !value || /^[0-9A-F]{8}$/i.test(value);
 const normalize = (value: string) => value.replace(/\s/g, '').toUpperCase();
 
-export const OperationsTab: React.FC<OperationsTabProps> = ({ isConnected, isBusy, tags, onOpenScanner, onWriteEpc, onWriteData, writeStatus }) => {
+export const OperationsTab: React.FC<OperationsTabProps> = ({ isConnected, isBusy, tags, onWriteEpc, onWriteData, writeStatus }) => {
   const [quickEpc, setQuickEpc] = useState('');
   const [quickPwd, setQuickPwd] = useState('');
   const [targetEpc, setTargetEpc] = useState('');
@@ -65,9 +64,8 @@ export const OperationsTab: React.FC<OperationsTabProps> = ({ isConnected, isBus
     <details className="rounded-xl border border-slate-200 bg-white">
       <summary className="px-6 py-5 text-sm font-medium">Advanced memory write <span className="ml-2 text-xs font-normal text-slate-400">Select a target EPC and memory bank</span></summary>
       <fieldset disabled={writeStatus === 'pending'} className="min-w-0 space-y-5 border-t border-slate-100 p-6">
-        <ScannedTagPicker tags={tags} selectedEpc={targetEpc} onSelect={setTargetEpc} onOpenScanner={onOpenScanner} />
-        <Input label="Target EPC" value={targetEpc} onChange={e => setTargetEpc(normalize(e.target.value))} className="font-mono" placeholder="EPC of the tag to update" error={targetEpc && !hexWords(targetEpc) ? 'Enter a valid hexadecimal EPC in groups of 4 characters.' : undefined} />
-        <p className="text-xs leading-5 text-slate-500">Choose a scanned EPC above or enter it manually. If two physical tags share the same EPC, isolate the intended tag before writing.</p>
+        <ScannedTagPicker tags={tags} selectedEpc={targetEpc} onSelect={setTargetEpc} disabled={writeStatus === 'pending'} error={targetEpc && !hexWords(targetEpc) ? 'Enter a valid hexadecimal EPC in groups of 4 characters.' : undefined} />
+        <p className="text-xs leading-5 text-slate-500">{tags.length > 0 ? 'Choose from Scan tags using the arrow, or type an EPC. ' : ''}If two physical tags share the same EPC, isolate the intended tag before writing.</p>
         <div className="grid gap-4 sm:grid-cols-3">
           <div><label htmlFor="memory-bank" className="mb-2 block text-sm font-medium text-slate-600">Memory bank</label><select id="memory-bank" className="h-[42px] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={bank} onChange={e => setBank(Number(e.target.value))}><option value={1}>EPC (1)</option><option value={3}>User (3)</option><option value={0}>Reserved (0)</option><option value={2}>TID (2)</option></select></div>
           <Input label="Word pointer" type="number" min={0} value={bank === 1 ? '2' : pointer} onChange={e => setPointer(e.target.value)} disabled={bank === 1} />

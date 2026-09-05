@@ -188,7 +188,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
           {activeTab === 3 && (
             <OperationsTab 
               tags={props.tags}
-              onOpenScanner={() => selectTab(1)}
               isBusy={operationActive || props.isFileTransferring}
               onWriteEpc={props.onWriteEpc}
               onWriteData={props.onWriteData}

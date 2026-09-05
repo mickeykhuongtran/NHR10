@@ -3,6 +3,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { OperationsTab } from '../components/dashboard/OperationsTab';
+import { ScannedTagPicker } from '../components/dashboard/ScannedTagPicker';
 
 vi.mock('react-virtualized-auto-sizer', () => ({ default: ({ children }: any) => children({ height: 300, width: 900 }) }));
 vi.mock('../services/bleService', () => ({ bleService: { getSettings: vi.fn() } }));
@@ -80,7 +81,7 @@ it('keeps a stop action available across tabs and blocks conflicting commands', 
 });
 
 it('requires valid EPC data and explicit confirmation before writing', () => {
-  const props = { isConnected: true, isBusy: false, tags: [], onOpenScanner: vi.fn(), onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
+  const props = { isConnected: true, isBusy: false, tags: [], onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
   render(<OperationsTab {...props} />);
   fill(input('New EPC (hexadecimal)'), 'ZZZZ');
   expect(button('Review & write EPC').disabled).toBe(true);
@@ -141,11 +142,14 @@ it('uses a selected scanned EPC as the actual write target and requires review',
   act(() => buttons().find(b => b.textContent?.includes('Write EPC'))!.click());
   const advanced = [...container.querySelectorAll('details')].find(d => d.querySelector('summary')?.textContent?.includes('Advanced memory write'))!;
   act(() => { advanced.open = true; });
-  const picker = [...advanced.querySelectorAll('button')].find(b => b.textContent?.includes('Choose from scanned tags'))!;
+  const picker = advanced.querySelector<HTMLButtonElement>('[aria-label="Choose from scanned tags"]')!;
+  expect(picker.parentElement).toBe(input('Target EPC').parentElement);
   act(() => picker.click());
-  fill(input('Filter scanned EPCs'), '778899');
-  expect(container.querySelectorAll('input[type="radio"]')).toHaveLength(1);
-  act(() => container.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(2);
+  fill(input('Target EPC'), '778899');
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  act(() => container.querySelector<HTMLElement>('[role="option"]')!.click());
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
   expect(input('Target EPC').value).toBe(props.tags[0].epc);
   const newEpcLabel = [...advanced.querySelectorAll('label')].find(l => l.textContent === 'New EPC (hexadecimal)')!;
   fill(container.querySelector<HTMLInputElement>(`#${CSS.escape(newEpcLabel.htmlFor)}`)!, 'E20099887766554433221100');
@@ -158,21 +162,60 @@ it('uses a selected scanned EPC as the actual write target and requires review',
   expect(container.querySelector('main')?.textContent).not.toContain('Old inline message');
   expect(container.querySelector('.notification')?.textContent).toContain('Write confirmed');
 });
-it('explains an empty scanned list and offers navigation to Scan tags', () => {
-  const props = { isConnected: true, isBusy: false, tags: [], onOpenScanner: vi.fn(), onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
+it('shows the dropdown only with scan results and retains manual input when results are cleared', () => {
+  const props = { isConnected: true, isBusy: false, tags: [], onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
   render(<OperationsTab {...props} />);
-  const picker = buttons().find(b => b.textContent?.includes('Choose from scanned tags'))!;
-  act(() => picker.click());
-  expect(container.textContent).toContain('No scanned tags yet');
-  click('Go to Scan tags →'); expect(props.onOpenScanner).toHaveBeenCalledOnce();
+  expect(container.querySelector('[aria-label="Choose from scanned tags"]')).toBeNull();
+  fill(input('Target EPC'), 'aabb 1122');
+  expect(input('Target EPC').value).toBe('AABB1122');
+  const tags = Array.from({ length: 125 }, (_, index) => ({ epc: index.toString(16).padStart(8, '0').toUpperCase(), timestamp: 100, count: 1 }));
+  render(<OperationsTab {...props} tags={tags} />);
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Choose from scanned tags"]')!.click());
+  expect([...container.querySelectorAll('[role="option"]')].map(option => option.textContent)).toEqual(tags.map(tag => tag.epc));
+  render(<OperationsTab {...props} />);
+  expect(container.querySelector('[aria-label="Choose from scanned tags"]')).toBeNull();
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
+  expect(input('Target EPC').value).toBe('AABB1122');
+});
+
+it('supports keyboard selection, dismissal and write locking in the inline EPC picker', () => {
+  const tags = [{ epc: 'AABB1122', timestamp: 100, count: 1 }, { epc: 'CCDD3344', timestamp: 101, count: 2 }];
+  const props = { tags, selectedEpc: '', onSelect: vi.fn() };
+  render(<ScannedTagPicker {...props} />);
+  const target = input('Target EPC');
+  const key = (key: string) => act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+  target.focus(); key('ArrowDown'); key('ArrowDown');
+  expect(document.getElementById(target.getAttribute('aria-activedescendant')!)?.textContent).toBe('CCDD3344');
+  key('Enter'); expect(props.onSelect).toHaveBeenCalledWith('CCDD3344');
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
+  expect(document.activeElement).toBe(target);
+  key('ArrowDown'); key('Escape'); expect(target.getAttribute('aria-expanded')).toBe('false');
+  key('ArrowDown'); act(() => target.blur()); expect(container.querySelector('[role="listbox"]')).toBeNull();
+  key('ArrowDown'); render(<ScannedTagPicker {...props} disabled />);
+  expect(target.disabled).toBe(true); expect(container.querySelector('[role="listbox"]')).toBeNull();
+});
+
+it('explains every RF preset before applying one and retains its command mapping', async () => {
+  const props = fixture(); props.status = 'connected'; render(<DashboardLayout {...props} />);
+  const profiles = ['Standard', 'Quick', 'Deep'];
+  for (const label of profiles) {
+    const choice = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+    expect(document.getElementById(choice.getAttribute('aria-describedby')!)?.textContent?.length).toBeGreaterThan(30);
+    expect(choice.getAttribute('aria-pressed')).toBe('false');
+  }
+  const quick = container.querySelector<HTMLButtonElement>('[aria-label="Quick"]')!;
+  await act(async () => quick.click());
+  expect(props.onApplyPreset).toHaveBeenCalledWith('quick');
+  expect(quick.getAttribute('aria-pressed')).toBe('true');
+  expect(container.textContent).toContain('Profile 11, Q2, S0, Tag Focus off');
 });
 
 it('sends the chosen target, memory bank, pointer and password for advanced data writes', () => {
   const tag = { epc: 'E20000112233445566778899', timestamp: 100, count: 4 };
-  const props = { isConnected: true, isBusy: false, tags: [tag], onOpenScanner: vi.fn(), onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
+  const props = { isConnected: true, isBusy: false, tags: [tag], onWriteEpc: vi.fn(), onWriteData: vi.fn(), writeStatus: 'idle' as const };
   render(<OperationsTab {...props} />);
-  act(() => buttons().find(b => b.textContent?.includes('Choose from scanned tags'))!.click());
-  act(() => container.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Choose from scanned tags"]')!.click());
+  act(() => container.querySelector<HTMLElement>('[role="option"]')!.click());
   const bank = container.querySelector<HTMLSelectElement>('#memory-bank')!;
   act(() => { bank.value = '3'; bank.dispatchEvent(new Event('change', { bubbles: true })); });
   fill(input('Word pointer'), '4'); fill(input('Access password (optional)'), '11223344'); fill(input('Data (hexadecimal words)'), 'AABBCCDD');
