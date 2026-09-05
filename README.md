@@ -559,6 +559,8 @@ The key point: the new app does not have to use Web Bluetooth. As long as it kee
 
 ## Controller feedback and targeted writes
 
+Device settings now wait for device replies and verify Apply by reading the value back. See [the inspected firmware contract and missing Region/Save handlers](docs/settings-firmware-contract.md) before relying on those features.
+
 - Device activity occupies a fixed-height row. Pending commands disable conflicting controls without inserting inline notices or moving the page contents.
 - Find mode treats `F` with `rssi: -100` as the NHR-10 lost-target sentinel, not a measured signal. The available NHR-10 REVC firmware sends this after 2 seconds without a target read. A 2.5-second browser watchdog also clears a stale reading if that notification is missed. Waiting, detected, lost and stopped states remain separate; late packets for another EPC or a stopped session are ignored.
 - Write results appear in the shared dismissible notification: 4.2 seconds for a confirmation, 6.5 seconds for an error. Each write attempt has its own notification identity. Transport errors, a disconnect and a 10-second response timeout also produce a notice. All results remain in Diagnostics / the exported service report after the toast disappears.

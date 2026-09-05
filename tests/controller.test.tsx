@@ -28,7 +28,7 @@ const fill = (element: HTMLInputElement, value: string) => act(() => {
   element.dispatchEvent(new Event('input', { bubbles: true }));
 });
 const fixture = (): React.ComponentProps<typeof DashboardLayout> => ({
-  commandPending: false,
+  commandPending: false, settingsActivity: null, onSettingsAction: vi.fn(),
   status: 'disconnected', settings: {
     power: 20, buzzer: true, tagFocus: true, fastTid: false, linkProfile: 53, qValue: 4, session: 1,
     scanParams: { interval: 30, dwell: 2, count: 0 }, version: 'test', temperature: 24,
@@ -43,7 +43,7 @@ const fixture = (): React.ComponentProps<typeof DashboardLayout> => ({
   onUpdateSettings: vi.fn(), onSaveSetting: vi.fn(), onFetchHistory: vi.fn(), onDownloadJson: vi.fn(), onDownloadCsv: vi.fn(),
   onDownloadTxt: vi.fn(), onShare: vi.fn(), onClearFileData: vi.fn(), historyData: [], isBatchSaving: false,
   batchSaveInfo: { state: 'idle', progress: 0, written: 0, total: 0 }, onDownloadLogs: vi.fn(), onClearLogs: vi.fn(),
-  isFileTransferring: false, transferProgress: 0, transferStatus: 'idle', onApplyPreset: vi.fn(), onSaveConfig: vi.fn(), onShowPopup: vi.fn(),
+  isFileTransferring: false, transferProgress: 0, transferStatus: 'idle', onApplyPreset: vi.fn(), onShowPopup: vi.fn(),
 });
 
 it('starts with the guided scan workflow and keeps engineering tools collapsed', () => {
@@ -179,4 +179,24 @@ it('sends the chosen target, memory bank, pointer and password for advanced data
   click('Review memory write'); click('Confirm write');
   expect(props.onWriteData).toHaveBeenCalledWith(tag.epc, 3, 4, 'AABBCCDD', '11223344');
   expect(props.onWriteEpc).not.toHaveBeenCalled();
+});
+
+it('preserves settings button identity, focus, drafts and layout during telemetry and pending operations', () => {
+  const props = fixture(); props.status = 'connected';
+  render(<DashboardLayout {...props} />); click('Advanced'); click('Device settings');
+  const profileCard = container.querySelector('[aria-label="RF Link Profile"]')!;
+  const read = [...profileCard.querySelectorAll('button')].find(b => b.textContent === 'Read')!;
+  const q = container.querySelector<HTMLSelectElement>('#setting-q')!;
+  act(() => { q.value = '2'; q.dispatchEvent(new Event('change', { bubbles: true })); });
+  read.focus(); act(() => read.click());
+  expect(props.onSettingsAction).toHaveBeenCalledWith({ id: 'profile', mode: 'read' });
+  const pending = { id: 'profile' as const, mode: 'read' as const, phase: 'Reading' as const, title: 'RF link profile' };
+  render(<DashboardLayout {...props} settingsActivity={pending} logs={[{ type: 'rx', timestamp: 1, message: 'GB sample' }]} />);
+  expect(container.querySelector('[aria-label="RF Link Profile"]')).toBe(profileCard);
+  expect(profileCard.querySelector('button')).toBe(read); expect(document.activeElement).toBe(read);
+  expect(q.value).toBe('2'); expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Device configuration"]')?.disabled).toBe(false);
+  act(() => read.click()); expect(props.onSettingsAction).toHaveBeenCalledOnce();
+  render(<DashboardLayout {...props} />);
+  expect(profileCard.querySelector('button')).toBe(read); expect(document.activeElement).toBe(read);
+  expect(q.value).toBe('2');
 });

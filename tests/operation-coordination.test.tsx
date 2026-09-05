@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   stopScan: vi.fn(), startScan: vi.fn(), stopLocate: vi.fn(), resetLocate: vi.fn(), addLog: vi.fn(),
   scan: { isScanning: false, activeScanType: null, stopScan: vi.fn(), resetScanSession: vi.fn(), handleDataReceived: vi.fn() },
   connection: { status: 'connected', logs: [], settings: {}, addLog: vi.fn(), setInventoryActive: vi.fn(), handleDataReceived: vi.fn() },
-  ble: { setCallbacks: vi.fn(), writeEpc: vi.fn() },
+  ble: { setCallbacks: vi.fn(), writeEpc: vi.fn(), sendCommand: vi.fn() },
 }));
 vi.mock('../components/dashboard/DashboardLayout', () => ({ DashboardLayout: (props: any) => { captured = props; return <div />; } }));
 vi.mock('../services/bleService', () => ({ bleService: mocks.ble }));
@@ -21,6 +21,7 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks();
   mocks.connection.status = 'connected';
   mocks.stopScan.mockResolvedValue(undefined); mocks.startScan.mockResolvedValue(undefined); mocks.ble.writeEpc.mockResolvedValue(undefined);
+  mocks.ble.sendCommand.mockResolvedValue(undefined);
   root = createRoot(document.createElement('div'));
   act(() => root.render(<App />));
 });
@@ -85,4 +86,15 @@ it('blocks duplicate write calls and mode changes while waiting for a write resp
   expect(mocks.ble.writeEpc).toHaveBeenCalledOnce(); expect(mocks.startScan).not.toHaveBeenCalled();
   act(() => vi.advanceTimersByTime(10000));
   expect(mocks.addLog).toHaveBeenLastCalledWith(expect.stringContaining('No write response'), 'error', expect.objectContaining({ id: 'write-1' }));
+});
+
+it('blocks scans and tag writes until a settings response is verified', async () => {
+  await act(async () => { void captured.onSettingsAction({ id: 'power', mode: 'read' }); });
+  expect(captured.settingsActivity?.phase).toBe('Reading');
+  await act(async () => captured.onStartScan());
+  await act(async () => captured.onWriteEpc('', 'AABBCCDD'));
+  expect(mocks.startScan).not.toHaveBeenCalled(); expect(mocks.ble.writeEpc).not.toHaveBeenCalled();
+  await act(async () => mocks.ble.setCallbacks.mock.calls.at(-1)![0]({ cmd: 'GP', val: 20 }));
+  expect(captured.settingsActivity).toBeNull();
+  await act(async () => captured.onStartScan()); expect(mocks.startScan).toHaveBeenCalledOnce();
 });

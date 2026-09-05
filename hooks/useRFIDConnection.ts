@@ -4,6 +4,7 @@ import { ConnectionStatus, Settings, LogEntry, SettingsSyncRevision } from '../t
 import { parseBatterySnapshot } from '../utils/battery';
 import { formatDeviceDisplayName } from '../utils/deviceIdentity';
 import { validateBleDeviceName } from '../utils/deviceName';
+import { isSettingsError, parseSettingReading } from '../utils/settingsProtocol';
 
 const IDLE_BATTERY_POLL_INTERVAL_MS = 5000;
 const IDLE_BATTERY_TIMEOUT_MS = 15000;
@@ -253,6 +254,7 @@ export const useRFIDConnection = () => {
             addLog('Ignored malformed GB battery response', 'error');
         }
     }
+    if (isSettingsError(data)) return;
     if (data.cmd === 'GP' || data.cmd === 'SP') {
         const power = parseFiniteNumber(data.val ?? data.power ?? data.pwr);
         if (power !== null) {
@@ -312,8 +314,8 @@ export const useRFIDConnection = () => {
         }
     }
     if (data.cmd === 'GTF' || data.cmd === 'TF' || data.cmd === 'STF') {
-        const val = parseInt(String(data.val));
-        setSettings(prev => ({ ...prev, tagFocus: val === 1, syncRevision: bumpSettingsSyncRevision(prev, 'tagFocus') }));
+        const reading = parseSettingReading('tag-focus', data);
+        if (reading) setSettings(prev => ({ ...prev, tagFocus: reading.val === 1, syncRevision: bumpSettingsSyncRevision(prev, 'tagFocus') }));
     }
     if (data.cmd === 'GF' || data.cmd === 'SF') {
         const regionBand = parseRegionBand(data);

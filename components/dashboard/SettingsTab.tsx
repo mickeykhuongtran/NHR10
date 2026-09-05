@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RegionBandSelection, Settings as SettingsType } from '../../types';
-import { bleService } from '../../services/bleService';
+import { SettingsActivity } from '../../hooks/useSettingsActions';
+import { SettingsRequest } from '../../utils/settingsProtocol';
 import { PageHeader } from './PageHeader';
 import { BLE_DEVICE_NAME_MAX_BYTES, validateBleDeviceName } from '../../utils/deviceName';
 
@@ -10,10 +11,8 @@ interface SettingsTabProps {
   isConnected: boolean;
   isBusy: boolean;
   settings: SettingsType;
-  onUpdateSettings: (key: keyof SettingsType, value: any) => void;
-  onSaveSetting: (key: string, value: any) => void;
-  onSaveConfig: () => void;
-  onShowPopup: (content: string, time: number, beep: boolean) => void;
+  activity: SettingsActivity | null;
+  onAction: (request: SettingsRequest) => void | Promise<void>;
 }
 
 const LINK_PROFILES = [
@@ -77,6 +76,24 @@ const formatFrequencyMHz = (khz: number | undefined) => (
 type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
 type SelectOption = { label: string; value: number };
 type SettingsAction = () => void | Promise<void>;
+
+// Keep the component identity stable across telemetry and pending-state renders.
+const ActionRow = ({ id, onGet, onSet, setDisabled = false, activity, locked }: {
+  id: string; onGet: SettingsAction; onSet: SettingsAction; setDisabled?: boolean;
+  activity: SettingsActivity | null; locked: boolean;
+}) => {
+  const pending = activity !== null;
+  const active = activity?.id === id;
+  const invoke = (action: SettingsAction) => { if (!locked && !pending) void action(); };
+  return <div className="mt-3">
+    <div className="grid grid-cols-2 gap-2">
+      <Button onClick={() => invoke(onGet)} disabled={locked} aria-disabled={locked || pending} aria-busy={active && activity.mode === 'read'} variant="secondary" size="sm" className={COMPACT_BUTTON_CLASS}>Read</Button>
+      <Button onClick={() => { if (!setDisabled) invoke(onSet); }} disabled={locked || setDisabled} aria-disabled={locked || pending || setDisabled} aria-busy={active && activity.mode === 'apply'} variant="primary" size="sm" className={COMPACT_BUTTON_CLASS}>Apply</Button>
+    </div>
+    <p className="mt-2 h-5 text-xs text-blue-700" role="status">{active ? activity.phase + '…' : ''}</p>
+  </div>;
+};
+
 const ACTIVE_CARD_STYLE: React.CSSProperties = { borderColor: '#93b4fa' };
 
 const SettingsCard = ({
@@ -98,6 +115,7 @@ const SettingsCard = ({
 
   return (
     <section
+      aria-label={title}
       className={`soft-glass rounded-xl p-5 transition-colors  ${className}`}
       style={isActive ? ACTIVE_CARD_STYLE : undefined}
     >
@@ -128,7 +146,7 @@ const RegionSelectField = ({ value, onChange }: {
   {REGION_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
 </select>;
 
-export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, settings, onSaveConfig }) => {
+export const SettingsTab = React.memo(function SettingsTab({ isConnected, isBusy, settings, activity, onAction }: SettingsTabProps) {
   const [power, setPower] = useState(settings.power);
   const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
@@ -143,12 +161,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
   const [customCount, setCustomCount] = useState(() => normalizeRegionNumber(settings.regionBand?.count, VN_REGION_DEFAULT.count));
   const [customSpace, setCustomSpace] = useState(() => normalizeRegionNumber(settings.regionBand?.space125KHz, VN_REGION_DEFAULT.space125KHz));
   const [saveRegion, setSaveRegion] = useState(settings.regionBand?.save ?? true);
-  const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
+  const activeActionKey = activity ? activity.id + ':' + activity.mode : null;
+  const actionRowProps = { activity, locked: !isConnected || isBusy };
   const [confirmSave, setConfirmSave] = useState(false);
-  const [actionError, setActionError] = useState('');
-  const [actionPending, setActionPending] = useState(false);
-  const inFlightRef = useRef(false);
-  const activeActionTimerRef = useRef<number | null>(null);
   const powerSyncRevision = settings.syncRevision?.power ?? 0;
   const deviceNameSyncRevision = settings.syncRevision?.deviceName ?? 0;
   const profileSyncRevision = settings.syncRevision?.linkProfile ?? 0;
@@ -199,29 +214,23 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
     setAppend(settings.scanParams.append || 0);
   }, [queryParamsSyncRevision, settings.scanParams?.append, settings.scanParams?.dwell, settings.scanParams?.interval]);
 
-  useEffect(() => () => {
-    if (activeActionTimerRef.current !== null) {
-      window.clearTimeout(activeActionTimerRef.current);
-    }
-  }, []);
-
   useEffect(() => {
     if (!isConnected || isBusy) setConfirmSave(false);
   }, [isConnected, isBusy]);
 
-  const handleGetPower = () => bleService.getPower();
-  const handleSetPower = () => bleService.setPower(power);
-  const handleGetDeviceName = () => bleService.getConfiguredDeviceName();
-  const handleSetDeviceName = () => bleService.setConfiguredDeviceName(deviceName);
-  const handleGetProfile = () => bleService.getProfile();
-  const handleSetProfile = () => bleService.setLinkProfile(profile);
-  const handleGetQSession = () => bleService.getQSession();
-  const handleSetQSession = () => bleService.setQSession(qValue, session);
-  const handleGetQueryParams = () => bleService.getQueryParam();
-  const handleSetQueryParams = () => bleService.setQueryParam(queryInterval, dwell, append);
-  const handleGetTagFocus = () => bleService.getTagFocus();
-  const handleSetTagFocus = () => bleService.setTagFocus(tagFocus);
-  const handleGetRegion = () => bleService.getRegion();
+  const handleGetPower = () => onAction({ id: 'power', mode: 'read' });
+  const handleSetPower = () => onAction({ id: 'power', mode: 'apply', value: power });
+  const handleGetDeviceName = () => onAction({ id: 'device-name', mode: 'read' });
+  const handleSetDeviceName = () => onAction({ id: 'device-name', mode: 'apply', value: deviceName });
+  const handleGetProfile = () => onAction({ id: 'profile', mode: 'read' });
+  const handleSetProfile = () => onAction({ id: 'profile', mode: 'apply', value: profile });
+  const handleGetQSession = () => onAction({ id: 'q-session', mode: 'read' });
+  const handleSetQSession = () => onAction({ id: 'q-session', mode: 'apply', value: { q: qValue, session } });
+  const handleGetQueryParams = () => onAction({ id: 'query-params', mode: 'read' });
+  const handleSetQueryParams = () => onAction({ id: 'query-params', mode: 'apply', value: { interval: queryInterval, dwell, append } });
+  const handleGetTagFocus = () => onAction({ id: 'tag-focus', mode: 'read' });
+  const handleSetTagFocus = () => onAction({ id: 'tag-focus', mode: 'apply', value: tagFocus });
+  const handleGetRegion = () => onAction({ id: 'region-band', mode: 'read' });
   const adjustPower = (delta: number) => setPower((current) => clampNumber(current + delta, 0, 30));
   const customStepKHz = customSpace * 125;
   const customEndKHz = customStartKHz + Math.max(0, customCount - 1) * customStepKHz;
@@ -250,77 +259,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
     }
   };
   const handleSetRegion = () => {
-    if (regionSelection === 'Custom') {
-      if (customRegionError) return;
-      return bleService.setCustomRegion(customStartKHz, customCount, customSpace, saveRegion);
-    }
-
-    return bleService.setRegion(regionSelection, saveRegion);
+    if (regionSelection === 'Custom' && customRegionError) return;
+    return onAction({ id: 'region-band', mode: 'apply', value: { selection: regionSelection, startKHz: customStartKHz, count: customCount, space125KHz: customSpace, save: saveRegion } });
   };
   const tagFocusIndicatorStyle: React.CSSProperties = {
     width: 'calc((100% - 0.5rem) / 2)',
     transform: tagFocus ? 'translateX(100%)' : 'translateX(0)',
   };
-
-  const markActionPressed = (actionKey: string) => {
-    setActiveActionKey(actionKey);
-    if (activeActionTimerRef.current !== null) {
-      window.clearTimeout(activeActionTimerRef.current);
-    }
-    activeActionTimerRef.current = window.setTimeout(() => {
-      setActiveActionKey(null);
-      activeActionTimerRef.current = null;
-    }, 380);
-  };
-
-  const runSettingsAction = async (actionKey: string, action: SettingsAction) => {
-    if (!isConnected || isBusy || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setActionPending(true); setActionError(''); markActionPressed(actionKey);
-    try { await action(); } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Device command failed.');
-    } finally { inFlightRef.current = false; setActionPending(false); }
-  };
-  const getSettingsActionHandlers = (actionKey: string, action: SettingsAction) => ({
-    onClick: () => void runSettingsAction(actionKey, action),
-  });
-
-  const ActionRow = ({
-    id,
-    onGet,
-    onSet,
-    setDisabled = false,
-  }: {
-    id: string;
-    onGet: SettingsAction;
-    onSet: SettingsAction;
-    setDisabled?: boolean;
-  }) => (
-    <div className="mt-3 grid grid-cols-2 gap-2">
-      <Button
-        {...getSettingsActionHandlers(`${id}:get`, onGet)}
-        disabled={!isConnected}
-        variant="secondary"
-        size="sm"
-        className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:get` ? 'bg-white/95 text-slate-800  brightness-[1.07]' : ''
-        }`}
-      >
-        Read
-      </Button>
-      <Button
-        {...getSettingsActionHandlers(`${id}:set`, onSet)}
-        disabled={!isConnected || setDisabled}
-        variant="primary"
-        size="sm"
-        className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:set` ? ' brightness-[1.1] saturate-[1.18]' : ''
-        }`}
-      >
-        Apply
-      </Button>
-    </div>
-  );
 
   return (
     <div className="page-content">
@@ -331,9 +276,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
         meta={<span className={`rounded-full border px-2 py-0.5 text-xs font-normal ${isConnected ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]' : 'border-[#FF9500]/35 bg-[#FF9500]/10 text-[#A45A00]'}`}>{isConnected ? 'Device online' : 'Offline · controls locked'}</span>}
       />
 
-      <p className="text-sm leading-6 text-slate-500">Read retrieves the current value. Apply sends a change to the reader. Save configuration keeps the applied RF settings after a restart.</p>
-      {actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}
-      <fieldset disabled={!isConnected || isBusy || actionPending} aria-label="Device configuration" className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
+      <p className="text-sm leading-6 text-slate-500">Read retrieves the current value. Apply changes it, then reads it back to verify. Only the requested setting is updated.</p>
+      <fieldset disabled={!isConnected || isBusy} aria-label="Device configuration" className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <SettingsCard actionId="power" activeActionKey={activeActionKey} title="Power" subtitle="RF output">
           <div className="flex items-center justify-center gap-3">
             <button
@@ -355,7 +299,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               +
             </button>
           </div>
-          <ActionRow id="power" onGet={handleGetPower} onSet={handleSetPower} />
+          <ActionRow {...actionRowProps} id="power" onGet={handleGetPower} onSet={handleSetPower} />
         </SettingsCard>
 
         <SettingsCard
@@ -385,7 +329,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               </span>
             </div>
           </div>
-          <ActionRow
+          <ActionRow {...actionRowProps}
             id="device-name"
             onGet={handleGetDeviceName}
             onSet={handleSetDeviceName}
@@ -406,7 +350,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
             options={PROFILE_SELECT_OPTIONS}
             onChange={setProfile}
           />
-          <ActionRow id="profile" onGet={handleGetProfile} onSet={handleSetProfile} />
+          <ActionRow {...actionRowProps} id="profile" onGet={handleGetProfile} onSet={handleSetProfile} />
         </SettingsCard>
 
         <SettingsCard
@@ -436,7 +380,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               />
             </div>
           </div>
-          <ActionRow id="q-session" onGet={handleGetQSession} onSet={handleSetQSession} />
+          <ActionRow {...actionRowProps} id="q-session" onGet={handleGetQSession} onSet={handleSetQSession} />
         </SettingsCard>
 
         <SettingsCard actionId="tag-focus" activeActionKey={activeActionKey} title="Tag Focus" subtitle="Singulation assist">
@@ -462,7 +406,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               </button>
             ))}
           </div>
-          <ActionRow id="tag-focus" onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
+          <ActionRow {...actionRowProps} id="tag-focus" onGet={handleGetTagFocus} onSet={handleSetTagFocus} />
         </SettingsCard>
 
         <SettingsCard
@@ -537,7 +481,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
             </div>
           )}
 
-          <ActionRow
+          <ActionRow {...actionRowProps}
             id="region-band"
             onGet={handleGetRegion}
             onSet={handleSetRegion}
@@ -581,16 +525,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               />
             </div>
           </div>
-          <ActionRow id="query-params" onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
+          <ActionRow {...actionRowProps} id="query-params" onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
         </SettingsCard>
 
         <section className="soft-glass rounded-lg p-3 xl:col-span-2">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h3 className="text-sm font-semibold text-slate-700">Save Configuration</h3>
-              <p className="mt-0.5 text-xs font-normal text-[#64748b]">Persist current settings to device memory</p>
+              <p className="mt-0.5 text-xs font-normal text-[#64748b]">Requires configuration-save support in the installed firmware</p>
             </div>
-            <Button onClick={() => setConfirmSave(true)} disabled={!isConnected} title={!isConnected ? 'Connect the NHR-10 before saving configuration' : undefined} variant="primary" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
+            <Button onClick={() => { if (!activity) setConfirmSave(true); }} disabled={!isConnected} aria-disabled={Boolean(activity)} title={!isConnected ? 'Connect the NHR-10 before saving configuration' : undefined} variant="primary" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
               Save configuration
             </Button>
           </div>
@@ -605,7 +549,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
               </div>
               <div className="flex gap-2 sm:shrink-0">
                 <Button variant="outline" size="sm" onClick={() => setConfirmSave(false)} className="h-9 flex-1 sm:min-w-[90px]">Cancel</Button>
-                <Button variant="danger" size="sm" onClick={() => { void runSettingsAction('config:save', onSaveConfig); setConfirmSave(false); }} className="h-9 flex-1 sm:min-w-[130px]">Confirm save</Button>
+                <Button variant="danger" size="sm" onClick={() => { if (!activity) void onAction({ id: 'config', mode: 'save' }); setConfirmSave(false); }} className="h-9 flex-1 sm:min-w-[130px]">Confirm save</Button>
               </div>
             </div>
           )}
@@ -613,4 +557,4 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
       </fieldset>
     </div>
   );
-};
+});

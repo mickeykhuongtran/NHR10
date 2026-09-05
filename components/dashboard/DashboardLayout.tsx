@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
+import { SettingsActivity } from '../../hooks/useSettingsActions';
+import { SettingsRequest } from '../../utils/settingsProtocol';
 import { Notification } from '../ui/Notification';
 import { Button } from '../ui/Button';
 import { TopBar } from './TopBar';
@@ -19,6 +21,8 @@ interface DashboardLayoutProps {
   scanStats: ScanStats;
   logs: LogEntry[];
   commandPending: boolean;
+  settingsActivity: SettingsActivity | null;
+  onSettingsAction: (request: SettingsRequest) => void | Promise<void>;
   isScanning: boolean;
   scanStartedAt: number | null;
   scanStoppedAt: number | null;
@@ -60,7 +64,6 @@ interface DashboardLayoutProps {
   transferProgress: number;
   transferStatus: FileTransferStatus;
   onApplyPreset: (mode: 'standard' | 'quick' | 'deep') => void;
-  onSaveConfig: () => void;
   onShowPopup: (content: string, time: number, beep: boolean) => void;
 }
 
@@ -83,9 +86,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   const isMoreTabActive = moreTabs.some(tab => tab.id === activeTab);
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => { mainRef.current?.focus({ preventScroll: true }); }, [activeTab]);
-  const deviceBusy = props.commandPending || props.writeStatus === 'pending';
+  const deviceBusy = props.commandPending || props.writeStatus === 'pending' || props.settingsActivity !== null;
   const operationActive = props.isScanning || props.isLocating || props.isBatchSaving || deviceBusy;
-  const operationLabel = props.commandPending ? 'Waiting for device command…' : props.writeStatus === 'pending' ? 'Waiting for write confirmation…' : props.isBatchSaving ? 'Saving batch data on device…' : props.isFileTransferring ? 'Downloading saved data…' : props.isLocating ? 'Finding a tag' : props.isScanning ? (props.activeScanType === 'batch' ? 'Batch scan in progress' : 'Live scan in progress') : props.status === 'connected' ? 'Device ready' : props.status === 'connecting' ? 'Connecting to the reader…' : 'Connect your reader to begin';
+  const operationLabel = props.settingsActivity ? `${props.settingsActivity.phase} ${props.settingsActivity.title}…` : props.commandPending ? 'Waiting for device command…' : props.writeStatus === 'pending' ? 'Waiting for write confirmation…' : props.isBatchSaving ? 'Saving batch data on device…' : props.isFileTransferring ? 'Downloading saved data…' : props.isLocating ? 'Finding a tag' : props.isScanning ? (props.activeScanType === 'batch' ? 'Batch scan in progress' : 'Live scan in progress') : props.status === 'connected' ? 'Device ready' : props.status === 'connecting' ? 'Connecting to the reader…' : 'Connect your reader to begin';
   const showStop = (props.isLocating && activeTab !== 2) || (props.isScanning && activeTab !== 1);
 
   const selectTab = (tabId: number) => {
@@ -216,12 +219,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
           {activeTab === 4 && (
             <SettingsTab 
-              isBusy={operationActive || props.isFileTransferring}
+              isBusy={props.isScanning || props.isLocating || props.isBatchSaving || props.commandPending || props.writeStatus === 'pending' || props.isFileTransferring}
+              activity={props.settingsActivity}
+              onAction={props.onSettingsAction}
               settings={props.settings}
-              onUpdateSettings={props.onUpdateSettings}
-              onSaveSetting={props.onSaveSetting}
-              onSaveConfig={props.onSaveConfig}
-              onShowPopup={props.onShowPopup}
               isConnected={props.status === 'connected'}
             />
           )}

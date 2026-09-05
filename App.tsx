@@ -6,6 +6,8 @@ import { useRFIDConnection } from './hooks/useRFIDConnection';
 import { useScanLogic } from './hooks/useScanLogic';
 import { useLocateLogic } from './hooks/useLocateLogic';
 import { useFileTransfer } from './hooks/useFileTransfer';
+import { useSettingsActions } from './hooks/useSettingsActions';
+import { SettingsRequest } from './utils/settingsProtocol';
 
 const DEFAULT_BATCH_SAVE_INFO: BatchSaveInfo = {
   state: 'idle',
@@ -38,9 +40,10 @@ const App: React.FC = () => {
   const [batchSaveInfo, setBatchSaveInfo] = useState<BatchSaveInfo>(DEFAULT_BATCH_SAVE_INFO);
   const batchSavingTimerRef = useRef<number | null>(null);
   const isBatchSaving = batchSaveInfo.state === 'saving';
+  const settingsActions = useSettingsActions(connection.addLog, connection.status);
 
   const runOperation = async (action: () => Promise<void>) => {
-    if (commandPendingRef.current || pendingWriteRef.current !== null || connection.status !== 'connected') return;
+    if (commandPendingRef.current || pendingWriteRef.current !== null || settingsActions.isPending() || connection.status !== 'connected') return;
     commandPendingRef.current = true;
     setCommandPending(true);
     try { await action(); } finally {
@@ -111,6 +114,7 @@ const App: React.FC = () => {
 
   // --- Unified Data Handler ---
 const handleDataReceived = useCallback((data: any) => {
+    const handledSettingsReply = settingsActions.handleDataReceived(data);
     // 1. Dữ liệu hệ thống (Pin, Info, Settings) luôn được cho phép xử lý
     connection.handleDataReceived(data);
 
@@ -170,7 +174,7 @@ const handleDataReceived = useCallback((data: any) => {
       }
     }
 
-    if (data.cmd === 'SF') {
+    if (data.cmd === 'SF' && !handledSettingsReply) {
       if (data.status === 'ok') {
         connection.addLog(`Region Band set: ${data.val ?? data.mode ?? 'updated'}`, 'info');
         void bleService.getRegion().catch((error) => connection.addLog(`Region sync failed: ${error.message}`, 'error'));
@@ -179,11 +183,11 @@ const handleDataReceived = useCallback((data: any) => {
       }
     }
 
-    if (data.cmd === 'GF' && data.status === 'err') {
+    if (data.cmd === 'GF' && data.status === 'err' && !handledSettingsReply) {
       connection.addLog(`Region Band read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
     }
 
-    if (data.cmd === 'SDN') {
+    if (data.cmd === 'SDN' && !handledSettingsReply) {
       const status = String(data.status ?? '').toLowerCase();
       if (status === 'err' || status === 'error' || data.ok === false) {
         connection.addLog(`Bluetooth name update failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
@@ -194,13 +198,13 @@ const handleDataReceived = useCallback((data: any) => {
       }
     }
 
-    if (data.cmd === 'GDN') {
+    if (data.cmd === 'GDN' && !handledSettingsReply) {
       const status = String(data.status ?? '').toLowerCase();
       if (status === 'err' || status === 'error' || data.ok === false) {
         connection.addLog(`Bluetooth name read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
       }
     }
-  }, [connection, scan, locate, markBatchSaving, clearBatchSaving, finishWrite]);
+  }, [connection, scan, locate, markBatchSaving, clearBatchSaving, finishWrite, settingsActions.handleDataReceived]);
 
   useEffect(() => {
     if (fileTransfer.transferStatus === 'saving') {
@@ -297,14 +301,10 @@ const handleDataReceived = useCallback((data: any) => {
     }
   };
 
-  const handleSaveConfig = async () => {
-      try {
-          await bleService.saveConfig();
-          connection.addLog('Configuration Saved to Flash', 'info');
-      } catch (e: any) {
-          connection.addLog(`Save Config Failed: ${e.message}`, 'error');
-      }
-  };
+  const handleSettingsAction = useCallback((request: SettingsRequest) => {
+    if (commandPendingRef.current || pendingWriteRef.current !== null || scan.isScanning || locate.isLocating || isBatchSaving || fileTransfer.isFileTransferring) return;
+    return settingsActions.run(request);
+  }, [scan.isScanning, locate.isLocating, isBatchSaving, fileTransfer.isFileTransferring, settingsActions.run]);
 
   const handleApplyPreset = async (mode: 'standard' | 'quick' | 'deep') => {
     try {
@@ -334,7 +334,7 @@ const handleDataReceived = useCallback((data: any) => {
   };
 
   const writeTag = async (action: () => Promise<void>) => {
-    if (pendingWriteRef.current !== null || commandPendingRef.current || connection.status !== 'connected' || scan.isScanning || locate.isLocating || isBatchSaving || fileTransfer.isFileTransferring) return;
+    if (pendingWriteRef.current !== null || commandPendingRef.current || settingsActions.isPending() || connection.status !== 'connected' || scan.isScanning || locate.isLocating || isBatchSaving || fileTransfer.isFileTransferring) return;
     const attempt = ++writeAttemptRef.current;
     pendingWriteRef.current = attempt;
     setWriteStatus('pending');
@@ -395,6 +395,8 @@ const handleDataReceived = useCallback((data: any) => {
       scanStats={scan.stats}
       logs={connection.logs}
       commandPending={commandPending}
+      settingsActivity={settingsActions.activity}
+      onSettingsAction={handleSettingsAction}
       
       onConnect={connection.connect}
       onDisconnect={() => {
@@ -437,7 +439,6 @@ const handleDataReceived = useCallback((data: any) => {
       
       onUpdateSettings={handleUpdateSettings}
       onSaveSetting={handleSaveSetting}
-      onSaveConfig={handleSaveConfig}
       onApplyPreset={handleApplyPreset}
       onShowPopup={handleShowPopup}
       
