@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Code2, Crosshair, Database, MoreHorizontal, Radio, ScanBarcode, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
+import { useNotifications } from '../../hooks/useNotifications';
+import { Notification } from '../ui/Notification';
+import { Button } from '../ui/Button';
 import { TopBar } from './TopBar';
 import { ScannerTab } from './ScannerTab';
 import { LocateTab } from './LocateTab';
 import { OperationsTab } from './OperationsTab';
-import { DevelopTab } from './DevelopTab';
 import { SettingsTab } from './SettingsTab';
 import { DebugTab } from './DebugTab';
 import { HistoryTab } from './HistoryTab';
@@ -16,6 +18,7 @@ interface DashboardLayoutProps {
   tags: Tag[];
   scanStats: ScanStats;
   logs: LogEntry[];
+  commandPending: boolean;
   isScanning: boolean;
   scanStartedAt: number | null;
   scanStoppedAt: number | null;
@@ -63,36 +66,26 @@ interface DashboardLayoutProps {
 export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   const [activeTab, setActiveTab] = useState<number>(1);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-  const [toastLog, setToastLog] = useState<LogEntry | null>(null);
-  const lastToastTimestampRef = useRef(0);
+  const { notice, dismiss } = useNotifications(props.logs);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [locateEpc, setLocateEpc] = useState<string>('');
   const [scannerExcludedEpcs, setScannerExcludedEpcs] = useState<string[]>([]);
   const [scannerExcludedSnapshots, setScannerExcludedSnapshots] = useState<Record<string, Tag>>({});
 
   const tabs = [
-    { id: 1, label: 'Scanner', icon: Radio },
-    { id: 2, label: 'Locate', icon: Crosshair },
-    { id: 3, label: 'Encode', icon: ScanBarcode },
-    { id: 6, label: 'Storage', icon: Database },
-    { id: 4, label: 'Settings', icon: SlidersHorizontal },
-    { id: 7, label: 'Develop', icon: Code2 },
-    { id: 5, label: 'Debug', icon: SquareTerminal },
+    { id: 1, label: 'Scan tags', detail: 'Live inventory' },
+    { id: 2, label: 'Find a tag', detail: 'Signal-guided search' },
+    { id: 3, label: 'Write EPC', detail: 'Program a tag' },
+    { id: 6, label: 'Saved data', detail: 'Batch inventory & export' },
   ];
-  const primaryMobileTabIds = new Set([1, 2, 3, 6]);
-  const moreTabs = tabs.filter((tab) => !primaryMobileTabIds.has(tab.id));
-  const isMoreTabActive = moreTabs.some((tab) => tab.id === activeTab);
-
-  useEffect(() => {
-    const latestNotice = [...props.logs].reverse().find((entry) => (
-      entry.type === 'error' || /connected|reconnect|saved|success|failed|offline|popup sent/i.test(entry.message)
-    ));
-    if (!latestNotice || latestNotice.timestamp <= lastToastTimestampRef.current) return;
-
-    lastToastTimestampRef.current = latestNotice.timestamp;
-    setToastLog(latestNotice);
-    const timeoutId = window.setTimeout(() => setToastLog(null), latestNotice.type === 'error' ? 6500 : 4200);
-    return () => window.clearTimeout(timeoutId);
-  }, [props.logs]);
+  const moreTabs = [{ id: 4, label: 'Device settings' }, { id: 5, label: 'Diagnostics' }];
+  const isMoreTabActive = moreTabs.some(tab => tab.id === activeTab);
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => { mainRef.current?.focus({ preventScroll: true }); }, [activeTab]);
+  const deviceBusy = props.commandPending || props.writeStatus === 'pending';
+  const operationActive = props.isScanning || props.isLocating || props.isBatchSaving || deviceBusy;
+  const showOperation = operationActive && (activeTab !== 1 || props.isLocating || deviceBusy);
+  const operationLabel = props.commandPending ? 'Waiting for device command…' : props.writeStatus === 'pending' ? 'Waiting for write confirmation…' : props.isBatchSaving ? 'Saving batch data on device…' : props.isLocating ? 'Finding a tag' : props.activeScanType === 'batch' ? 'Batch scan in progress' : 'Live scan in progress';
 
   const selectTab = (tabId: number) => {
     setActiveTab(tabId);
@@ -110,80 +103,36 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
       />
 
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden relative min-h-0">
-        {/* Sidebar / Bottom Navigation */}
-        <nav
-          className="soft-glass-strong relative order-2 flex w-full shrink-0 border-t border-[#52c7da]/30 lg:order-1 lg:w-56 lg:flex-col lg:border-r lg:border-t-0 z-20"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-        >
-          {mobileMoreOpen && (
-            <div
-              id="mobile-more-navigation"
-              className="soft-glass absolute bottom-[calc(100%+0.5rem)] right-2 z-[210] w-52 rounded-xl border border-[#52c7da]/30 bg-white/92 p-2 shadow-[0_18px_48px_rgba(18,78,90,0.2)] backdrop-blur-2xl lg:hidden"
-            >
-              <p className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7A8E92]">Engineering tools</p>
-              {moreTabs.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => selectTab(tab.id)}
-                    className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-bold uppercase tracking-wide transition-colors ${
-                      isActive ? 'bg-[#E7F9FC] text-[#166B78]' : 'text-[#52666B] hover:bg-[#F3FCFE]'
-                    }`}
-                  >
-                    <Icon size={18} className={isActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="scrollbar-none flex w-full flex-row items-center justify-around overflow-x-hidden lg:flex-col lg:justify-start lg:overflow-y-auto lg:px-3 lg:py-4 lg:space-y-1">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              const isPrimaryMobileTab = primaryMobileTabIds.has(tab.id);
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => selectTab(tab.id)}
-                  className={`${isPrimaryMobileTab ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:px-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:rounded-xl lg:px-3 lg:py-3 ${
-                    isActive 
-                      ? 'bg-white/70 text-[#166B78] shadow-sm shadow-[#52c7da]/10'
-                      : 'text-[#6E6E73] hover:bg-white/45 hover:text-[#166B78]'
-                  }`}
-                >
-                  <Icon size={isActive ? 21 : 19} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
-                  <span className={`text-[10px] font-bold uppercase tracking-wide sm:text-[11px] lg:text-[13px] whitespace-nowrap ${isActive ? 'text-[#166B78]' : ''}`}>
-                    {tab.label.toUpperCase()}
-                  </span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setMobileMoreOpen((current) => !current)}
-              aria-expanded={mobileMoreOpen}
-              aria-controls="mobile-more-navigation"
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2 transition-colors duration-200 sm:px-2 lg:hidden ${
-                isMoreTabActive || mobileMoreOpen ? 'bg-white/70 text-[#166B78] shadow-sm' : 'text-[#6E6E73]'
-              }`}
-            >
-              <MoreHorizontal size={isMoreTabActive ? 21 : 19} className={isMoreTabActive ? 'text-[#52c7da]' : 'text-[#86868B]'} />
-              <span className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wide sm:text-[11px]">MORE</span>
-            </button>
+        <a href="#main-content" className="skip-link">Skip to controls</a>
+        <aside className="relative z-20 order-2 shrink-0 border-t border-slate-200 bg-white lg:order-1 lg:flex lg:w-[218px] lg:flex-col lg:border-r lg:border-t-0">
+          <div className="hidden px-6 pb-3 pt-7 lg:block"><p className="eyebrow">Workspace</p></div>
+          <nav aria-label="Main navigation" className="flex justify-around px-1 py-1 lg:block lg:space-y-1 lg:px-3 lg:py-0" style={{ paddingBottom: 'max(4px, env(safe-area-inset-bottom))' }}>
+            {tabs.map((tab, index) => (
+              <button key={tab.id} onClick={() => selectTab(tab.id)} aria-current={activeTab === tab.id ? 'page' : undefined} className="nav-item !w-auto !flex-1 !justify-center !px-2 !text-[13px] lg:!w-full lg:!justify-start lg:!px-3 lg:!text-sm">
+                <span className="nav-number hidden lg:block">0{index + 1}</span><span>{tab.label}</span>
+              </button>
+            ))}
+            <button className="nav-item !w-auto !flex-1 !justify-center !px-2 !text-[13px] lg:!hidden" onClick={() => setMobileMoreOpen(!mobileMoreOpen)} aria-expanded={mobileMoreOpen} aria-controls="mobile-tools" aria-current={isMoreTabActive ? 'page' : undefined}>More</button>
+          </nav>
+          {mobileMoreOpen && <nav id="mobile-tools" aria-label="Engineering tools" className="absolute bottom-full right-3 mb-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-lg lg:hidden">
+            <p className="eyebrow px-3 py-2">Advanced</p>
+            {moreTabs.map(tab => <button key={tab.id} className="nav-item" aria-current={activeTab === tab.id ? 'page' : undefined} onClick={() => selectTab(tab.id)}>{tab.label}</button>)}
+          </nav>}
+          <div className="mt-8 hidden border-t border-slate-100 px-3 pt-4 lg:block">
+            <button className="nav-item justify-between" onClick={() => setAdvancedOpen(!advancedOpen)} aria-expanded={advancedOpen || isMoreTabActive} aria-controls="advanced-navigation">Advanced<ChevronDown size={15} className={advancedOpen || isMoreTabActive ? 'rotate-180' : ''} /></button>
+            {(advancedOpen || isMoreTabActive) && <nav id="advanced-navigation" aria-label="Engineering tools">
+              {moreTabs.map(tab => <button key={tab.id} className="nav-item pl-6" aria-current={activeTab === tab.id ? 'page' : undefined} onClick={() => selectTab(tab.id)}>{tab.label}</button>)}
+              <p className="px-3 py-2 text-xs leading-5 text-slate-400">RF configuration and service diagnostics.</p>
+            </nav>}
           </div>
-          
-          <div className="p-4 border-t border-[#52c7da]/20 hidden lg:block mt-auto">
-            <p className="text-[10px] text-[#86868B] font-mono text-center">v{props.settings.version || '1.0.0'}</p>
-          </div>
-        </nav>
-
-        {/* Main Content Area */}
-        <main className="order-1 lg:order-2 flex-1 overflow-hidden relative min-h-0 bg-transparent">
+          <div className="mt-auto hidden px-6 py-6 lg:block"><p className="text-xs font-medium text-slate-500">Nextwaves NHR-10</p><p className="mt-1 text-xs text-slate-400">{props.status === 'connected' && props.settings.version ? 'Firmware ' + props.settings.version : 'Bluetooth controller'}</p></div>
+        </aside>
+        <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col lg:order-2">
+          {showOperation && <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50 px-6 py-2 text-sm text-blue-800" role="status">
+            <span>{operationLabel}</span>
+            {!props.isBatchSaving && !deviceBusy && <Button variant="outline" size="sm" onClick={props.isLocating ? props.onStopLocate : props.activeScanType === 'batch' ? props.onStopBatch : props.onStopScan}>Stop {props.isLocating ? 'finding' : 'scan'}</Button>}
+          </div>}
+          <main id="main-content" ref={mainRef} tabIndex={-1} className="relative min-h-0 min-w-0 flex-1 overflow-hidden outline-none">
           {activeTab === 1 && (
             <ScannerTab 
               isScanning={props.isScanning}
@@ -202,6 +151,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               tags={props.tags}
               stats={props.scanStats}
               onApplyPreset={props.onApplyPreset}
+              onChooseTag={(epc) => { setLocateEpc(epc); selectTab(2); }}
+              onOpenStorage={() => selectTab(6)}
+              isBusy={props.isLocating || props.isFileTransferring || deviceBusy}
+              isConnecting={props.status === 'connecting'}
               isBatchSaving={props.isBatchSaving}
               isConnected={props.status === 'connected'}
               onConnect={props.onConnect}
@@ -217,6 +170,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
             <LocateTab 
               onLocate={props.onLocate}
               onStopLocate={props.onStopLocate}
+              isBusy={props.isScanning || props.isBatchSaving || props.isFileTransferring || deviceBusy}
+              tags={props.tags}
               targetRssi={props.targetRssi}
               isLocating={props.isLocating}
               targetEpc={locateEpc}
@@ -227,6 +182,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
           {activeTab === 3 && (
             <OperationsTab 
+              isBusy={operationActive || props.isFileTransferring}
               onWriteEpc={props.onWriteEpc}
               onWriteData={props.onWriteData}
               writeStatus={props.writeStatus}
@@ -237,6 +193,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
           {activeTab === 6 && (
             <HistoryTab 
+              isBusy={props.isScanning || props.isLocating || deviceBusy}
               onFetchHistory={props.onFetchHistory}
               onDownloadJson={props.onDownloadJson}
               onDownloadCsv={props.onDownloadCsv}
@@ -256,6 +213,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
           {activeTab === 4 && (
             <SettingsTab 
+              isBusy={operationActive || props.isFileTransferring}
               settings={props.settings}
               onUpdateSettings={props.onUpdateSettings}
               onSaveSetting={props.onSaveSetting}
@@ -265,21 +223,13 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
             />
           )}
 
-          {activeTab === 7 && (
-            <DevelopTab
-              activeScanType={props.activeScanType}
-              isBatchSaving={props.isBatchSaving}
-              isScanning={props.isScanning}
-              onClearTags={props.onClearTags}
-              onStartScan={props.onStartScan}
-              onStopScan={props.onStopScan}
-              status={props.status}
-              tags={props.tags}
-            />
-          )}
-
           {activeTab === 5 && (
             <DebugTab 
+              settings={props.settings}
+              status={props.status}
+              onConnect={props.onConnect}
+              onShowPopup={props.onShowPopup}
+              isBusy={operationActive || props.isFileTransferring}
               logs={props.logs}
               onDownloadHistory={props.onDownloadLogs}
               onClearLogs={props.onClearLogs}
@@ -287,24 +237,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               transferProgress={props.transferProgress}
             />
           )}
-        </main>
-
-        {toastLog && (
-          <div
-            role={toastLog.type === 'error' ? 'alert' : 'status'}
-            className={`absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-[220] flex max-w-[calc(100%-1.5rem)] items-start gap-2 rounded-xl border px-3 py-2.5 shadow-[0_16px_44px_rgba(18,78,90,0.2)] backdrop-blur-2xl lg:bottom-4 lg:max-w-md ${
-              toastLog.type === 'error'
-                ? 'border-[#FF3B30]/30 bg-white/94 text-[#A82118]'
-                : 'border-[#34C759]/30 bg-white/94 text-[#247A38]'
-            }`}
-          >
-            {toastLog.type === 'error' ? <AlertTriangle size={17} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
-            <p className="min-w-0 flex-1 text-xs font-semibold leading-4">{toastLog.message}</p>
-            <button type="button" onClick={() => setToastLog(null)} aria-label="Dismiss notification" className="rounded p-0.5 opacity-65 hover:opacity-100">
-              <X size={14} />
-            </button>
-          </div>
-        )}
+          </main>
+        </div>
+        <Notification notice={notice} onDismiss={dismiss} />
       </div>
     </div>
   );

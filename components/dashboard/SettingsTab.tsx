@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RegionBandSelection, Settings as SettingsType } from '../../types';
 import { bleService } from '../../services/bleService';
@@ -8,6 +8,7 @@ import { BLE_DEVICE_NAME_MAX_BYTES, validateBleDeviceName } from '../../utils/de
 
 interface SettingsTabProps {
   isConnected: boolean;
+  isBusy: boolean;
   settings: SettingsType;
   onUpdateSettings: (key: keyof SettingsType, value: any) => void;
   onSaveSetting: (key: string, value: any) => void;
@@ -40,8 +41,8 @@ const INTERVAL_SELECT_OPTIONS = INTERVAL_OPTIONS.map((item) => ({ label: `${item
 const APPEND_SELECT_OPTIONS = APPEND_OPTIONS.map((item) => ({ label: String(item), value: item }));
 const Q_SELECT_OPTIONS = Q_OPTIONS.map((item) => ({ label: String(item), value: item }));
 const SESSION_SELECT_OPTIONS = SESSION_OPTIONS.map((item) => ({ label: `S${item}`, value: item }));
-const FIELD_CLASS = 'soft-surface h-10 w-full rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#1D1D1F] outline-none focus:border-[#52c7da]/60 sm:h-9';
-const COMPACT_BUTTON_CLASS = 'h-10 text-[10px] font-bold tracking-wide sm:h-8';
+const FIELD_CLASS = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 focus:border-blue-500';
+const COMPACT_BUTTON_CLASS = 'h-10 text-sm';
 const REGION_MIN_KHZ = 840000;
 const REGION_MAX_KHZ = 960000;
 const VN_REGION_DEFAULT = { startKHz: 918500, count: 9, space125KHz: 4 };
@@ -74,16 +75,9 @@ const formatFrequencyMHz = (khz: number | undefined) => (
   typeof khz === 'number' && Number.isFinite(khz) ? `${(khz / 1000).toFixed(3)} MHz` : '--'
 );
 type SelectFieldId = 'profile' | 'q' | 'session' | 'interval' | 'dwell' | 'append';
-type SettingsSelectId = SelectFieldId | 'region';
 type SelectOption = { label: string; value: number };
 type SettingsAction = () => void | Promise<void>;
-type SettingsActionSource = 'early' | 'click';
-const ACTIVE_CARD_STYLE: React.CSSProperties = {
-  background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(218,247,252,0.88))',
-  boxShadow: '0 30px 78px rgba(18,78,90,0.22), 0 0 0 1px rgba(82,199,218,0.18) inset, 0 1px 0 rgba(255,255,255,0.98) inset',
-  backdropFilter: 'blur(36px) saturate(210%)',
-  WebkitBackdropFilter: 'blur(36px) saturate(210%)',
-};
+const ACTIVE_CARD_STYLE: React.CSSProperties = { borderColor: '#93b4fa' };
 
 const SettingsCard = ({
   actionId,
@@ -104,13 +98,13 @@ const SettingsCard = ({
 
   return (
     <section
-      className={`soft-glass rounded-lg p-3 transition-[background,box-shadow,filter,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isActive ? 'brightness-[1.06]' : ''} ${className}`}
+      className={`soft-glass rounded-xl p-5 transition-colors  ${className}`}
       style={isActive ? ACTIVE_CARD_STYLE : undefined}
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">{title}</h3>
-          {subtitle && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+          {subtitle && <p className="mt-0.5 text-xs font-normal text-[#64748b]">{subtitle}</p>}
         </div>
       </div>
       {children}
@@ -119,173 +113,22 @@ const SettingsCard = ({
 };
 
 const FieldLabel = ({ children }: { children: React.ReactNode }) => (
-  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#6E7F83]">{children}</label>
+  <label htmlFor={'setting-' + String(children).toLowerCase().replace(/[^a-z0-9]+/g, '-')} className="mb-1 block text-sm font-medium text-[#64748b]">{children}</label>
 );
 
-const SelectField = ({
-  id,
-  onChange,
-  onOpenChange,
-  openSelect,
-  options,
-  value,
-}: {
-  id: SelectFieldId;
-  onChange: (value: number) => void;
-  onOpenChange: React.Dispatch<React.SetStateAction<SettingsSelectId | null>>;
-  openSelect: SettingsSelectId | null;
-  options: SelectOption[];
-  value: number;
-}) => {
-  const selectRef = useRef<HTMLDivElement>(null);
-  const isOpen = openSelect === id;
-  const selectedValue = normalizeProfileValue(value, value);
-  const selectedOption = options.find((option) => option.value === selectedValue);
+const SelectField = ({ id, onChange, options, value }: {
+  id: SelectFieldId; onChange: (value: number) => void; options: SelectOption[]; value: number;
+}) => <select id={'setting-' + id} aria-label={id === 'profile' ? 'RF link profile' : id} className={FIELD_CLASS} value={value} onChange={event => onChange(Number(event.target.value))}>
+  {!options.some(option => option.value === value) && <option value={value}>{value} (device value)</option>}
+  {options.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}
+</select>;
+const RegionSelectField = ({ value, onChange }: {
+  value: RegionBandSelection; onChange: (value: RegionBandSelection) => void;
+}) => <select id="setting-region" className={FIELD_CLASS} value={value} onChange={event => onChange(event.target.value as RegionBandSelection)}>
+  {REGION_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+</select>;
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!selectRef.current?.contains(event.target as Node)) {
-        onOpenChange(null);
-      }
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [isOpen, onOpenChange]);
-
-  return (
-    <div ref={selectRef} className="relative">
-      <button
-        type="button"
-        className={`${FIELD_CLASS} flex items-center justify-between text-left`}
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-        onClick={() => onOpenChange((current) => current === id ? null : id)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            onOpenChange(null);
-          }
-        }}
-      >
-        <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
-        <ChevronDown
-          size={16}
-          strokeWidth={2.2}
-          className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
-          aria-hidden="true"
-        />
-      </button>
-
-      {isOpen && (
-        <div
-          role="listbox"
-          className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 touch-pan-y overscroll-contain overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
-        >
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={selectedValue === option.value}
-              className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
-                selectedValue === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
-              }`}
-              onClick={() => {
-                onChange(option.value);
-                onOpenChange(null);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const RegionSelectField = ({
-  onChange,
-  onOpenChange,
-  openSelect,
-  value,
-}: {
-  onChange: (value: RegionBandSelection) => void;
-  onOpenChange: React.Dispatch<React.SetStateAction<SettingsSelectId | null>>;
-  openSelect: SettingsSelectId | null;
-  value: RegionBandSelection;
-}) => {
-  const selectRef = useRef<HTMLDivElement>(null);
-  const isOpen = openSelect === 'region';
-  const selectedOption = REGION_OPTIONS.find((option) => option.value === value);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!selectRef.current?.contains(event.target as Node)) {
-        onOpenChange(null);
-      }
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [isOpen, onOpenChange]);
-
-  return (
-    <div ref={selectRef} className="relative">
-      <button
-        type="button"
-        className={`${FIELD_CLASS} flex items-center justify-between text-left`}
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-        onClick={() => onOpenChange((current) => current === 'region' ? null : 'region')}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            onOpenChange(null);
-          }
-        }}
-      >
-        <span className="truncate font-mono">{selectedOption?.label ?? value}</span>
-        <ChevronDown
-          size={16}
-          strokeWidth={2.2}
-          className={`shrink-0 text-[#5D7479] transition-transform duration-200 ${isOpen ? 'rotate-180 text-[#166B78]' : ''}`}
-          aria-hidden="true"
-        />
-      </button>
-
-      {isOpen && (
-        <div
-          role="listbox"
-          className="select-menu-scrollbar absolute left-0 right-0 top-[calc(100%+6px)] z-[130] max-h-52 touch-pan-y overscroll-contain overflow-y-auto rounded-md border border-[#52c7da]/24 bg-white p-1 shadow-[0_16px_42px_rgba(18,78,90,0.14)]"
-        >
-          {REGION_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={value === option.value}
-              className={`block h-8 w-full rounded px-2 text-left font-mono text-xs font-semibold sm:h-7 ${
-                value === option.value ? 'bg-[#E7F9FC] text-[#0C4F5B] ring-1 ring-[#52c7da]/35' : 'text-[#52666B] hover:bg-[#F5F5F7] hover:text-[#166B78]'
-              }`}
-              onClick={() => {
-                onChange(option.value);
-                onOpenChange(null);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings, onSaveConfig, onShowPopup }) => {
+export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, settings, onSaveConfig }) => {
   const [power, setPower] = useState(settings.power);
   const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [profile, setProfile] = useState(() => normalizeProfileValue(settings.linkProfile));
@@ -293,7 +136,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
   const [session, setSession] = useState(settings.session);
   const [queryInterval, setQueryInterval] = useState(settings.scanParams?.interval || 0);
   const [dwell, setDwell] = useState(settings.scanParams?.dwell || 0);
-  const [openSelect, setOpenSelect] = useState<SettingsSelectId | null>(null);
   const [append, setAppend] = useState(settings.scanParams?.append || 0);
   const [tagFocus, setTagFocus] = useState(settings.tagFocus);
   const [regionSelection, setRegionSelection] = useState<RegionBandSelection>(() => normalizeRegionSelection(settings.regionBand));
@@ -301,12 +143,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
   const [customCount, setCustomCount] = useState(() => normalizeRegionNumber(settings.regionBand?.count, VN_REGION_DEFAULT.count));
   const [customSpace, setCustomSpace] = useState(() => normalizeRegionNumber(settings.regionBand?.space125KHz, VN_REGION_DEFAULT.space125KHz));
   const [saveRegion, setSaveRegion] = useState(settings.regionBand?.save ?? true);
-  const [popupContent, setPopupContent] = useState('Hello!');
-  const [popupTime, setPopupTime] = useState(2000);
-  const [popupBeep, setPopupBeep] = useState(true);
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const [confirmSave, setConfirmSave] = useState(false);
-  const settingsActionAtRef = useRef(0);
+  const [actionError, setActionError] = useState('');
+  const [actionPending, setActionPending] = useState(false);
+  const inFlightRef = useRef(false);
   const activeActionTimerRef = useRef<number | null>(null);
   const powerSyncRevision = settings.syncRevision?.power ?? 0;
   const deviceNameSyncRevision = settings.syncRevision?.deviceName ?? 0;
@@ -365,8 +206,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
   }, []);
 
   useEffect(() => {
-    if (!isConnected) setConfirmSave(false);
-  }, [isConnected]);
+    if (!isConnected || isBusy) setConfirmSave(false);
+  }, [isConnected, isBusy]);
 
   const handleGetPower = () => bleService.getPower();
   const handleSetPower = () => bleService.setPower(power);
@@ -432,45 +273,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
     }, 380);
   };
 
-  const runSettingsAction = (actionKey: string, action: SettingsAction, source: SettingsActionSource) => {
-    if (!isConnected) return;
-    const now = Date.now();
-    if (source === 'click' && now - settingsActionAtRef.current < 650) {
-      return;
-    }
-    if (source === 'early' && now - settingsActionAtRef.current < 250) {
-      return;
-    }
-
-    settingsActionAtRef.current = now;
-    markActionPressed(actionKey);
-
-    try {
-      const result = action();
-      if (result && typeof result.catch === 'function') {
-        void result.catch((error) => console.error('Settings action failed', error));
-      }
-    } catch (error) {
-      console.error('Settings action failed', error);
-    }
+  const runSettingsAction = async (actionKey: string, action: SettingsAction) => {
+    if (!isConnected || isBusy || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setActionPending(true); setActionError(''); markActionPressed(actionKey);
+    try { await action(); } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Device command failed.');
+    } finally { inFlightRef.current = false; setActionPending(false); }
   };
-
   const getSettingsActionHandlers = (actionKey: string, action: SettingsAction) => ({
-    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
-      if (event.pointerType === 'mouse') return;
-      event.preventDefault();
-      event.stopPropagation();
-      runSettingsAction(actionKey, action, 'early');
-    },
-    onTouchStart: (event: React.TouchEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      runSettingsAction(actionKey, action, 'early');
-    },
-    onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      runSettingsAction(actionKey, action, 'click');
-    },
+    onClick: () => void runSettingsAction(actionKey, action),
   });
 
   const ActionRow = ({
@@ -491,10 +303,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
         variant="secondary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:get` ? 'bg-white/95 text-[#0C4F5B] shadow-[inset_0_2px_14px_rgba(18,78,90,0.14),0_10px_24px_rgba(18,78,90,0.08)] brightness-[1.07]' : ''
+          activeActionKey === `${id}:get` ? 'bg-white/95 text-slate-800  brightness-[1.07]' : ''
         }`}
       >
-        GET
+        Read
       </Button>
       <Button
         {...getSettingsActionHandlers(`${id}:set`, onSet)}
@@ -502,41 +314,44 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
         variant="primary"
         size="sm"
         className={`${COMPACT_BUTTON_CLASS} touch-manipulation ${
-          activeActionKey === `${id}:set` ? 'shadow-[inset_0_2px_16px_rgba(18,78,90,0.18),0_14px_30px_rgba(82,199,218,0.36)] brightness-[1.1] saturate-[1.18]' : ''
+          activeActionKey === `${id}:set` ? ' brightness-[1.1] saturate-[1.18]' : ''
         }`}
       >
-        SET
+        Apply
       </Button>
     </div>
   );
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto bg-transparent p-2 sm:p-3 md:p-5">
+    <div className="page-content">
       <PageHeader
         icon={SlidersHorizontal}
-        title="SETTINGS"
-        subtitle="Tune RF power, Gen2 behavior, inventory timing, and device utilities."
-        meta={<span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isConnected ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]' : 'border-[#FF9500]/35 bg-[#FF9500]/10 text-[#A45A00]'}`}>{isConnected ? 'Device online' : 'Offline · controls locked'}</span>}
+        title="Device settings"
+        subtitle="Read current values, adjust RF parameters, then apply them to your reader."
+        meta={<span className={`rounded-full border px-2 py-0.5 text-xs font-normal ${isConnected ? 'border-[#34C759]/35 bg-[#34C759]/10 text-[#248A3D]' : 'border-[#FF9500]/35 bg-[#FF9500]/10 text-[#A45A00]'}`}>{isConnected ? 'Device online' : 'Offline · controls locked'}</span>}
       />
 
-      <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <p className="text-sm leading-6 text-slate-500">Read retrieves the current value. Apply sends a change to the reader. Save configuration keeps the applied RF settings after a restart.</p>
+      {isBusy && <p role="status" className="text-sm text-amber-700">Finish the active operation before changing device settings.</p>}
+      {actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}
+      <fieldset disabled={!isConnected || isBusy || actionPending} aria-label="Device configuration" className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <SettingsCard actionId="power" activeActionKey={activeActionKey} title="Power" subtitle="RF output">
           <div className="flex items-center justify-center gap-3">
             <button
               type="button"
-              onClick={() => adjustPower(-1)}
-              className="h-11 w-11 rounded-md border border-[#52c7da]/22 bg-white/54 text-xl font-semibold text-[#166B78] shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
+              aria-label="Decrease RF power" onClick={() => adjustPower(-1)}
+              className="h-11 w-11 rounded-md border border-[#2563eb]/22 bg-white/54 text-xl font-semibold text-slate-700 shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
             >
               -
             </button>
-            <div className="min-w-[104px] rounded-lg border border-[#52c7da]/18 bg-white/48 px-3 py-2 text-center">
-              <div className="font-mono text-3xl font-bold text-[#0C4F5B]">{power}</div>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-[#7A8E92]">dBm</div>
+            <div className="min-w-[104px] rounded-lg border border-[#2563eb]/18 bg-white/48 px-3 py-2 text-center">
+              <div className="font-mono text-3xl font-bold text-slate-800">{power}</div>
+              <div className="text-sm font-medium text-[#64748b]">dBm</div>
             </div>
             <button
               type="button"
-              onClick={() => adjustPower(1)}
-              className="h-11 w-11 rounded-md border border-[#52c7da]/22 bg-white/54 text-xl font-semibold text-[#166B78] shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
+              aria-label="Increase RF power" onClick={() => adjustPower(1)}
+              className="h-11 w-11 rounded-md border border-[#2563eb]/22 bg-white/54 text-xl font-semibold text-slate-700 shadow-sm transition-colors hover:bg-white/82 sm:h-10 sm:w-10"
             >
               +
             </button>
@@ -549,20 +364,20 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
           activeActionKey={activeActionKey}
           title="Bluetooth Device Name"
           subtitle="GAP + advertising · persistent"
-          className="xl:col-span-2"
+          className=""
         >
           <div>
             <FieldLabel>Name</FieldLabel>
             <input
               type="text"
-              value={deviceName}
+              id="setting-name" value={deviceName}
               onChange={(event) => setDeviceName(event.target.value)}
               aria-invalid={!deviceNameValidation.valid}
               autoComplete="off"
               spellCheck={false}
               className={`${FIELD_CLASS} font-mono ${!deviceNameValidation.valid ? 'border-[#FF3B30]/60' : ''}`}
             />
-            <div className="mt-1.5 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-[10px] font-semibold">
+            <div className="mt-1.5 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-xs font-semibold">
               <span className={deviceNameValidation.valid ? 'text-[#527176]' : 'text-[#C32118]'}>
                 {deviceNameValidation.error ?? 'Applied after disconnect and the next advertising cycle'}
               </span>
@@ -584,15 +399,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
           activeActionKey={activeActionKey}
           title="RF Link Profile"
           subtitle="Backscatter link"
-          className={`relative overflow-visible ${openSelect === 'profile' ? 'z-[120]' : 'z-10'}`}
+          className=""
         >
           <SelectField
             id="profile"
             value={profile}
             options={PROFILE_SELECT_OPTIONS}
             onChange={setProfile}
-            openSelect={openSelect}
-            onOpenChange={setOpenSelect}
           />
           <ActionRow id="profile" onGet={handleGetProfile} onSet={handleSetProfile} />
         </SettingsCard>
@@ -602,7 +415,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
           activeActionKey={activeActionKey}
           title="EPC Gen2"
           subtitle="Q and session"
-          className={`relative overflow-visible ${openSelect === 'q' || openSelect === 'session' ? 'z-[120]' : 'z-10'}`}
+          className=""
         >
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -612,8 +425,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 value={qValue}
                 options={Q_SELECT_OPTIONS}
                 onChange={setQValue}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -623,8 +434,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 value={session}
                 options={SESSION_SELECT_OPTIONS}
                 onChange={setSession}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
           </div>
@@ -632,10 +441,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
         </SettingsCard>
 
         <SettingsCard actionId="tag-focus" activeActionKey={activeActionKey} title="Tag Focus" subtitle="Singulation assist">
-          <div className="soft-surface relative grid grid-cols-2 rounded-md border border-[#52c7da]/24 p-1">
+          <div className="soft-surface relative grid grid-cols-2 rounded-md border border-[#2563eb]/24 p-1">
             <span
               aria-hidden="true"
-              className="absolute bottom-1 left-1 top-1 rounded bg-[#E7F9FC]/95 shadow-[0_8px_22px_rgba(82,199,218,0.18)] ring-1 ring-[#52c7da]/45 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              className="absolute bottom-1 left-1 top-1 rounded bg-[#eff6ff]/95  ring-1 ring-[#2563eb]/45 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
               style={tagFocusIndicatorStyle}
             />
             {[
@@ -645,9 +454,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
               <button
                 key={item.label}
                 type="button"
-                onClick={() => setTagFocus(item.value)}
+                aria-pressed={tagFocus === item.value} onClick={() => setTagFocus(item.value)}
                 className={`relative z-10 h-10 rounded text-xs font-bold transition-colors sm:h-9 ${
-                  tagFocus === item.value ? 'text-[#0C4F5B]' : 'text-[#6E7F83] hover:text-[#166B78]'
+                  tagFocus === item.value ? 'text-slate-800' : 'text-[#64748b] hover:text-slate-700'
                 }`}
               >
                 {item.label}
@@ -662,7 +471,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
           activeActionKey={activeActionKey}
           title="RFID Region Band"
           subtitle="Reader frequency plan"
-          className={`relative overflow-visible xl:col-span-2 ${openSelect === 'region' ? 'z-[120]' : 'z-10'}`}
+          className="xl:col-span-2"
         >
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_104px]">
             <div>
@@ -670,17 +479,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
               <RegionSelectField
                 value={regionSelection}
                 onChange={handleRegionChange}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
             <div className="flex items-end">
-              <label className="soft-surface flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-[#52c7da]/20 bg-white/58 px-2 text-xs font-bold text-[#52666B] sm:h-9">
+              <label className="soft-surface flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-[#2563eb]/20 bg-white/58 px-2 text-xs font-bold text-[#52666B] sm:h-9">
                 <input
                   type="checkbox"
                   checked={saveRegion}
                   onChange={(event) => setSaveRegion(event.target.checked)}
-                  className="h-4 w-4 accent-[#52c7da]"
+                  className="h-4 w-4 accent-[#2563eb]"
                 />
                 Save
               </label>
@@ -695,7 +502,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                   type="number"
                   min={REGION_MIN_KHZ}
                   max={REGION_MAX_KHZ}
-                  value={customStartKHz}
+                  id="setting-start-freq-khz" value={customStartKHz}
                   onChange={(event) => setCustomStartKHz(normalizeRegionNumber(event.target.value, 0))}
                   className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customStartKHz < REGION_MIN_KHZ || customStartKHz > REGION_MAX_KHZ) ? 'border-[#FF3B30]/60' : ''}`}
                 />
@@ -706,7 +513,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                   type="number"
                   min={1}
                   max={255}
-                  value={customCount}
+                  id="setting-count" value={customCount}
                   onChange={(event) => setCustomCount(normalizeRegionNumber(event.target.value, 1))}
                   className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customCount < 1 || customCount > 255) ? 'border-[#FF3B30]/60' : ''}`}
                 />
@@ -718,14 +525,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                     type="number"
                     min={1}
                     max={255}
-                    value={customSpace}
+                    id="setting-space" value={customSpace}
                     onChange={(event) => setCustomSpace(normalizeRegionNumber(event.target.value, 1))}
                     className={`${FIELD_CLASS} text-right font-mono ${customRegionError && (customSpace < 1 || customSpace > 255) ? 'border-[#FF3B30]/60' : ''}`}
                   />
-                  <span className="shrink-0 text-[11px] font-bold text-[#6E7F83]">x125 kHz</span>
+                  <span className="shrink-0 text-xs font-bold text-[#64748b]">x125 kHz</span>
                 </div>
               </div>
-              <p className={`font-mono text-[11px] font-bold sm:col-span-3 ${customRegionError ? 'text-[#C32118]' : 'text-[#0C4F5B]'}`}>
+              <p className={`font-mono text-xs font-bold sm:col-span-3 ${customRegionError ? 'text-[#C32118]' : 'text-slate-800'}`}>
                 {customRegionError || `End ${customEndKHz} kHz (${formatFrequencyMHz(customEndKHz)}), step ${customStepKHz} kHz`}
               </p>
             </div>
@@ -744,7 +551,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
           activeActionKey={activeActionKey}
           title="Query Parameter"
           subtitle="Inventory timing"
-          className={`relative overflow-visible xl:col-span-2 ${openSelect === 'interval' || openSelect === 'dwell' || openSelect === 'append' ? 'z-[120]' : 'z-10'}`}
+          className="xl:col-span-2"
         >
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div>
@@ -754,8 +561,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 value={queryInterval}
                 options={INTERVAL_SELECT_OPTIONS}
                 onChange={setQueryInterval}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -765,8 +570,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 value={clampNumber(dwell, 2, 255)}
                 options={DWELL_SELECT_OPTIONS}
                 onChange={setDwell}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
             <div>
@@ -776,73 +579,20 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 value={append}
                 options={APPEND_SELECT_OPTIONS}
                 onChange={setAppend}
-                openSelect={openSelect}
-                onOpenChange={setOpenSelect}
               />
             </div>
           </div>
           <ActionRow id="query-params" onGet={handleGetQueryParams} onSet={handleSetQueryParams} />
         </SettingsCard>
 
-        <SettingsCard title="Device Popup" subtitle="Display test" className="xl:col-span-2">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px_104px]">
-            <div>
-              <FieldLabel>Content</FieldLabel>
-              <input
-                type="text"
-                value={popupContent}
-                onChange={(event) => setPopupContent(event.target.value.substring(0, 15))}
-                maxLength={15}
-                className={`${FIELD_CLASS} font-mono`}
-              />
-            </div>
-            <div>
-              <FieldLabel>Time</FieldLabel>
-              <input
-                type="number"
-                value={popupTime}
-                min={100}
-                max={10000}
-                onChange={(event) => setPopupTime(Number(event.target.value))}
-                className={`${FIELD_CLASS} text-right font-mono`}
-              />
-            </div>
-            <div>
-              <FieldLabel>Beep</FieldLabel>
-              <button
-                type="button"
-                onClick={() => setPopupBeep((current) => !current)}
-                className={`h-10 w-full rounded-md border text-xs font-bold transition-colors sm:h-9 ${
-                  popupBeep
-                    ? 'border-[#52c7da]/36 bg-white text-[#166B78]'
-                    : 'border-[#52c7da]/20 bg-white/48 text-[#7A8E92]'
-                }`}
-              >
-                {popupBeep ? 'ON' : 'OFF'}
-              </button>
-            </div>
-          </div>
-          <Button
-            onClick={() => onShowPopup(popupContent, popupTime, popupBeep)}
-            disabled={!isConnected}
-            title={!isConnected ? 'Connect the NHR-10 before sending a popup' : undefined}
-            variant="primary"
-            size="sm"
-            fullWidth
-            className={`${COMPACT_BUTTON_CLASS} mt-3`}
-          >
-            TEST POPUP
-          </Button>
-        </SettingsCard>
-
-        <section className="soft-glass rounded-lg p-3 md:col-span-2 xl:col-span-4">
+        <section className="soft-glass rounded-lg p-3 xl:col-span-2">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wide text-[#166B78]">Save Configuration</h3>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#7A8E92]">Persist current settings to device memory</p>
+              <h3 className="text-sm font-semibold text-slate-700">Save Configuration</h3>
+              <p className="mt-0.5 text-xs font-normal text-[#64748b]">Persist current settings to device memory</p>
             </div>
-            <Button onClick={() => setConfirmSave(true)} disabled={!isConnected} title={!isConnected ? 'Connect the NHR-10 before saving configuration' : undefined} variant="danger" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
-              SAVE CONFIG TO FLASH
+            <Button onClick={() => setConfirmSave(true)} disabled={!isConnected} title={!isConnected ? 'Connect the NHR-10 before saving configuration' : undefined} variant="primary" size="md" className="h-10 w-full font-bold tracking-wide md:h-9 md:w-auto md:min-w-[220px]">
+              Save configuration
             </Button>
           </div>
           {confirmSave && (
@@ -851,17 +601,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, settings,
                 <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[#C56A00]" />
                 <div>
                   <h4 id="confirm-save-title" className="text-xs font-bold text-[#7A3F00]">Persist current configuration?</h4>
-                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-[#8A5A24]">This overwrites the configuration stored in device flash.</p>
+                  <p className="mt-0.5 text-xs font-medium leading-4 text-[#8A5A24]">This overwrites the configuration stored in device flash.</p>
                 </div>
               </div>
               <div className="flex gap-2 sm:shrink-0">
-                <Button variant="outline" size="sm" onClick={() => setConfirmSave(false)} className="h-9 flex-1 sm:min-w-[90px]">CANCEL</Button>
-                <Button variant="danger" size="sm" onClick={() => { onSaveConfig(); setConfirmSave(false); }} className="h-9 flex-1 sm:min-w-[130px]">CONFIRM SAVE</Button>
+                <Button variant="outline" size="sm" onClick={() => setConfirmSave(false)} className="h-9 flex-1 sm:min-w-[90px]">Cancel</Button>
+                <Button variant="danger" size="sm" onClick={() => { void runSettingsAction('config:save', onSaveConfig); setConfirmSave(false); }} className="h-9 flex-1 sm:min-w-[130px]">Confirm save</Button>
               </div>
             </div>
           )}
         </section>
-      </div>
+      </fieldset>
     </div>
   );
 };

@@ -31,9 +31,38 @@ const App: React.FC = () => {
   // --- Operation State (Write) ---
   const [writeStatus, setWriteStatus] = useState<WriteStatus>('idle');
   const [writeMessage, setWriteMessage] = useState('');
+  const [commandPending, setCommandPending] = useState(false);
+  const commandPendingRef = useRef(false);
   const [batchSaveInfo, setBatchSaveInfo] = useState<BatchSaveInfo>(DEFAULT_BATCH_SAVE_INFO);
-  const batchSavingTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const batchSavingTimerRef = useRef<number | null>(null);
   const isBatchSaving = batchSaveInfo.state === 'saving';
+
+  const runOperation = async (action: () => Promise<void>) => {
+    if (commandPendingRef.current || connection.status !== 'connected') return;
+    commandPendingRef.current = true;
+    setCommandPending(true);
+    try { await action(); } finally {
+      commandPendingRef.current = false;
+      setCommandPending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (writeStatus !== 'pending') return;
+    const timer = window.setTimeout(() => {
+      setWriteStatus('error');
+      setWriteMessage('No write response received. Scan the tag to verify its data before retrying.');
+      connection.addLog('Write response timed out; verify the tag before retrying', 'error');
+    }, 10000);
+    return () => window.clearTimeout(timer);
+  }, [writeStatus, connection.addLog]);
+
+  useEffect(() => {
+    if (connection.status !== 'connected' && connection.status !== 'connecting' && writeStatus === 'pending') {
+      setWriteStatus('error');
+      setWriteMessage('Connection lost before confirmation. Scan the tag to verify its data.');
+    }
+  }, [connection.status, writeStatus]);
 
   const clearBatchSavingTimer = useCallback(() => {
     if (batchSavingTimerRef.current !== null) {
@@ -294,8 +323,12 @@ const handleDataReceived = useCallback((data: any) => {
         await bleService.setTagFocus(true);
         connection.addLog('Applied Deep Scan Mode', 'info');
       }
+      await bleService.getProfile();
+      await bleService.getQSession();
+      await bleService.getTagFocus();
     } catch (e: any) {
       connection.addLog(`Failed to apply preset: ${e.message}`, 'error');
+      throw e;
     }
   };
 
@@ -323,11 +356,21 @@ const handleDataReceived = useCallback((data: any) => {
 
   const handleDownloadLogs = () => {
     try {
-      const blob = new Blob([JSON.stringify(connection.logs, null, 2)], { type: 'application/json' });
+      const report = {
+        format: 'nhr10-service-report',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        connectionStatus: connection.status,
+        device: connection.settings,
+        operation: { scanType: scan.activeScanType, locating: locate.isLocating, batchSave: batchSaveInfo },
+        environment: { userAgent: navigator.userAgent, secureContext: window.isSecureContext, webBluetooth: 'bluetooth' in navigator },
+        logs: connection.logs,
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `system_logs_${Date.now()}.json`;
+      a.download = `nhr10_service_report_${Date.now()}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -353,12 +396,13 @@ const handleDataReceived = useCallback((data: any) => {
       tags={scan.tags}
       scanStats={scan.stats}
       logs={connection.logs}
+      commandPending={commandPending}
       
       onConnect={connection.connect}
       onDisconnect={() => {
         connection.disconnect();
-        scan.stopScan(); // Ensure scan state is reset
-        locate.stopLocate();
+        scan.resetScanSession();
+        locate.resetLocateState();
       }}
       
       isScanning={scan.isScanning}
@@ -369,24 +413,21 @@ const handleDataReceived = useCallback((data: any) => {
       staleRemoveMs={scan.staleRemoveMs}
       onChangeRemoveStaleTags={scan.setRemoveStaleTags}
       onChangeStaleRemoveMs={scan.setStaleRemoveMs}
-      onStartScan={scan.startScan}
-      onStopScan={() => {
-        scan.stopScan();
-        locate.stopLocate(); // Dọn dẹp triệt để state để không bị auto-restart
-      }}
-      onStartBatch={scan.startBatch}
-      onStopBatch={() => {
+      onStartScan={() => runOperation(scan.startScan)}
+      onStopScan={() => runOperation(async () => {
+        await scan.stopScan();
+        locate.resetLocateState();
+      })}
+      onStartBatch={() => runOperation(scan.startBatch)}
+      onStopBatch={() => runOperation(async () => {
         markBatchSaving();
-        scan.stopScan();
-        locate.stopLocate(); // Unified stop
-      }}
+        await scan.stopScan();
+        locate.resetLocateState();
+      })}
       onClearTags={scan.clearTags}
       
-      onLocate={locate.startLocate}
-      onStopLocate={() => {
-        scan.stopScan();
-        locate.stopLocate();
-      }}
+      onLocate={(epc) => runOperation(() => locate.startLocate(epc))}
+      onStopLocate={() => runOperation(locate.stopLocate)}
       targetRssi={locate.targetRssi}
       isLocating={locate.isLocating}
       

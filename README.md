@@ -46,6 +46,31 @@ TypeScript check:
 npm run lint
 ```
 
+## Demo controller interface
+
+The controller opens on **Scan tags**, with a three-step connection and inventory guide. Main navigation contains **Scan tags**, **Find a tag**, **Write EPC**, and **Saved data**. **Advanced** contains **Device settings** and **Diagnostics**; the Develop/camera tab has been removed.
+
+- **Scan tags:** Start scan shows live EPCs. Scan to device records a batch on the reader. Scan options holds RF presets and the stale-tag timeout, entered directly in milliseconds. Find tag carries an EPC into the locating view. Excluded tags can be restored.
+- **Find a tag:** Select a scanned EPC or enter it manually. Positive firmware signal values are labelled reader units; negative RSSI values are labelled dBm. The signal bar is relative, not a distance estimate.
+- **Write EPC:** Validate hexadecimal words, review the selected data, and confirm before writing. Advanced memory writing stays collapsed until needed. A missing write acknowledgement times out after 10 seconds and asks the operator to verify the tag before retrying.
+- **Saved data:** Stop and save the batch, then retrieve its EPC list. CSV, TXT, JSON, and sharing are available after download. Clear preview only clears the browser data.
+- **Device settings:** Read retrieves the current device value; Apply sends an update. Save configuration persists applied settings. RF edits and conflicting operations are disabled while the device is busy.
+- **Diagnostics:** Inspect identity, firmware, voltage, charger and temperature; filter or search TX/RX/error events; test the reader display/buzzer. Export service report downloads device state, environment details, operation state, and up to 1,000 retained log entries as JSON.
+
+Browser notices expire after **4.2 seconds** (normal) or **6.5 seconds** (errors). Notification timers are independent of incoming BLE traffic. Identical repeated events are suppressed for 10 seconds, and notices can be dismissed manually. Full events remain in Diagnostics.
+
+Verification:
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+Automated tests cover notification lifetime during streaming telemetry, navigation, busy-state guards, EPC confirmation, diagnostic filtering, and operation coordination. Actual RF performance, BLE reconnect, tag writes, and firmware batch save should also be checked with an NHR-10 reader.
+
+For browser UI checks, run the development server and open `/tests/ui.html`. This explicitly labelled fixture provides 240 simulated tags and continuous RX logs without connecting to hardware. It is not included in the production build.
+
 ## 3. Current App Operation Manual
 
 ### 3.1 Connecting The Reader
@@ -60,27 +85,27 @@ npm run lint
 
 After connection, the app starts a heartbeat loop to verify that the device is still online. If the GATT link drops unexpectedly, the app invalidates the old GATT characteristics and makes five bounded reconnect attempts (0.5 s, 1 s, 2 s, 4 s, and 8 s delays) against the same browser-authorized device. Every successful reconnect rediscovers services/characteristics, re-enables notifications, revalidates identity through `DI`, and resynchronizes reader state. A user-requested disconnect never triggers automatic reconnect.
 
-### 3.2 Scanner Tab
+### 3.2 Scan Tags
 
 The Scanner tab is used for realtime inventory and batch mode.
 
 Interactive scan:
 
-1. Press `START SCAN`.
+1. Press `Start scan`.
 2. The app clears the previous tag list.
 3. The app sends `{ "cmd": "S" }` through `FF01`.
 4. The reader starts inventory.
 5. The reader sends `live_tags` notifications through `FF01`.
 6. The app merges tags by EPC and updates count, RSSI, first seen, and last seen.
 7. The UI renders the tag list with throttling to stay smooth at high tag rates.
-8. Press `STOP SCAN`; the app sends `{ "cmd": "X" }` in a short repeated burst to improve reliability in noisy BLE environments.
+8. Press `Stop scan`; the app sends `{ "cmd": "X" }` in a short repeated burst to improve reliability in noisy BLE environments.
 
 Batch mode:
 
-1. Press `BATCH MODE`.
+1. Press `Scan to device`.
 2. The app sends `{ "cmd": "SB" }`.
 3. The reader performs inventory and stores data internally.
-4. Press `STOP BATCH`; the app sends `{ "cmd": "XB" }`.
+4. Press `Stop & save batch`; the app sends `{ "cmd": "XB" }`.
 5. If the reader returns `saving` or `busy`, the app waits until device-side saving is complete.
 6. Batch data is downloaded from the Storage tab using the `FF02`/`FF03` file-transfer flow.
 
@@ -139,7 +164,7 @@ The Storage tab downloads batch data stored in the reader:
 
 If the reader is still saving batch data, the app receives a busy response and retries up to 8 times, with a 1200 ms delay between attempts.
 
-### 3.6 Settings Tab
+### 3.6 Advanced Device Settings
 
 The Settings tab reads and writes reader configuration:
 
@@ -151,7 +176,7 @@ The Settings tab reads and writes reader configuration:
 | Q/session | `GQS` | `SQS` | EPC Gen2 singulation parameters |
 | Query timing | `GQP` | `SQP` | interval, dwell, append |
 | Tag Focus | `GTF` | `TF`, `STF` | `TF` sets runtime value, `STF` saves it |
-| Device popup | - | `POPUP` | Tests display on the reader |
+| Device popup (Diagnostics) | - | `POPUP` | Tests display on the reader |
 | Save config | - | `SAVE` | Saves configuration to flash |
 
 ## 4. Code Architecture
