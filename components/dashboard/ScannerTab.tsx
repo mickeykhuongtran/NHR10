@@ -171,7 +171,6 @@ export const ScannerTab: React.FC<ScannerTabProps> = (props) => {
         </div>
         <span className="text-xs text-slate-500">Elapsed <span className="ml-2 font-mono text-sm text-slate-800">{duration(props.scanStartedAt, props.isScanning ? now : props.scanStoppedAt)}</span></span>
       </div>
-      {props.isBusy && <p className="text-sm text-amber-700">Finish the active operation before starting a scan.</p>}
       {controlError && <p role="alert" className="text-sm text-red-700">{controlError}</p>}
       {(batch || props.isBatchSaving || props.batchSaveInfo.state === 'saved' || props.batchSaveInfo.state === 'save_failed') && <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900" role="status">
         {props.isBatchSaving ? `Saving on device · ${Math.round(props.batchSaveInfo.progress)}%` : props.batchSaveInfo.state === 'save_failed' ? 'The device could not save this batch. Check Diagnostics before starting again.' : batch ? 'Tags are being stored on the reader. Stop & save batch, then open Saved data to download them.' : 'Batch saved. Open Saved data to download and export your tags.'}

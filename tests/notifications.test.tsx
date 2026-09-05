@@ -60,3 +60,11 @@ describe('Notification lifetime under BLE traffic', () => {
     render([entry('Connected')]); act(() => root.render(null)); expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+it('shows identical write outcomes for distinct attempts and expires each one', () => {
+  const first = { ...entry('The reader confirmed the write.'), notice: { id: 'write-1', title: 'Write confirmed' } };
+  render([first]); advance(4200); expect(text()).toBe('');
+  const second = { ...entry(first.message), notice: { id: 'write-2', title: 'Write confirmed' } };
+  render([first, second]); expect(text()).toBe(first.message);
+  advance(4200); expect(text()).toBe('');
+});

@@ -121,9 +121,11 @@ export interface LogEntry {
   type: 'info' | 'error' | 'rx' | 'tx';
   message: string;
   timestamp: number;
+  notice?: { id: string; title: string };
 }
 
 export type WriteStatus = 'idle' | 'pending' | 'success' | 'error';
+export type LocateSignalState = 'idle' | 'waiting' | 'detected' | 'lost';
 
 export type ScanType = 'interactive' | 'batch' | null;
 

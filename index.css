@@ -39,7 +39,8 @@
   .soft-table-row:hover { background: #f8fafc; }
   .controller-button { min-height: 40px; }
   .controller-input { min-height: 42px; }
-  .page-content { display: flex; height: 100%; min-height: 0; flex-direction: column; gap: 24px; padding: 28px 32px; overflow-y: auto; }
+  .page-content { display: flex; height: 100%; min-height: 0; flex-direction: column; gap: 24px; padding: 28px 32px; overflow-y: auto; scrollbar-gutter: stable; }
+  .page-content > * { flex-shrink: 0; }
   .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: #758194; }
   .status-pill { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 500; background: #f1f3f5; color: #64748b; }
   .status-pill.online { background: #eefaf3; color: #157548; }

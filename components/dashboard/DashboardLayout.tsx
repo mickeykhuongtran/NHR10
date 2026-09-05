@@ -10,7 +10,7 @@ import { OperationsTab } from './OperationsTab';
 import { SettingsTab } from './SettingsTab';
 import { DebugTab } from './DebugTab';
 import { HistoryTab } from './HistoryTab';
-import { BatchSaveInfo, Settings, ConnectionStatus, Tag, LogEntry, ScanStats, FileTransferStatus } from '../../types';
+import { BatchSaveInfo, Settings, ConnectionStatus, Tag, LogEntry, ScanStats, FileTransferStatus, LocateSignalState } from '../../types';
 
 interface DashboardLayoutProps {
   status: ConnectionStatus;
@@ -37,6 +37,7 @@ interface DashboardLayoutProps {
   onLocate: (epc: string) => void;
   onStopLocate: () => void;
   targetRssi: number | null;
+  locateSignalState: LocateSignalState;
   isLocating: boolean;
   onWriteEpc: (targetEpc: string, newEpc: string, password?: string) => void;
   onWriteData: (epc: string, mem: number, ptr: number, data: string, password?: string) => void;
@@ -84,8 +85,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
   useEffect(() => { mainRef.current?.focus({ preventScroll: true }); }, [activeTab]);
   const deviceBusy = props.commandPending || props.writeStatus === 'pending';
   const operationActive = props.isScanning || props.isLocating || props.isBatchSaving || deviceBusy;
-  const showOperation = operationActive && (activeTab !== 1 || props.isLocating || deviceBusy);
-  const operationLabel = props.commandPending ? 'Waiting for device command…' : props.writeStatus === 'pending' ? 'Waiting for write confirmation…' : props.isBatchSaving ? 'Saving batch data on device…' : props.isLocating ? 'Finding a tag' : props.activeScanType === 'batch' ? 'Batch scan in progress' : 'Live scan in progress';
+  const operationLabel = props.commandPending ? 'Waiting for device command…' : props.writeStatus === 'pending' ? 'Waiting for write confirmation…' : props.isBatchSaving ? 'Saving batch data on device…' : props.isFileTransferring ? 'Downloading saved data…' : props.isLocating ? 'Finding a tag' : props.isScanning ? (props.activeScanType === 'batch' ? 'Batch scan in progress' : 'Live scan in progress') : props.status === 'connected' ? 'Device ready' : props.status === 'connecting' ? 'Connecting to the reader…' : 'Connect your reader to begin';
+  const showStop = (props.isLocating && activeTab !== 2) || (props.isScanning && activeTab !== 1);
 
   const selectTab = (tabId: number) => {
     setActiveTab(tabId);
@@ -128,10 +129,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
           <div className="mt-auto hidden px-6 py-6 lg:block"><p className="text-xs font-medium text-slate-500">Nextwaves NHR-10</p><p className="mt-1 text-xs text-slate-400">{props.status === 'connected' && props.settings.version ? 'Firmware ' + props.settings.version : 'Bluetooth controller'}</p></div>
         </aside>
         <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col lg:order-2">
-          {showOperation && <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50 px-6 py-2 text-sm text-blue-800" role="status">
-            <span>{operationLabel}</span>
-            {!props.isBatchSaving && !deviceBusy && <Button variant="outline" size="sm" onClick={props.isLocating ? props.onStopLocate : props.activeScanType === 'batch' ? props.onStopBatch : props.onStopScan}>Stop {props.isLocating ? 'finding' : 'scan'}</Button>}
-          </div>}
+          <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 text-xs text-slate-500 sm:px-6 sm:text-sm" aria-label="Device activity">
+            <span role="status" className={`min-w-0 line-clamp-2 ${operationActive || props.isFileTransferring ? 'text-blue-700' : ''}`}>{operationLabel}</span>
+            <Button className={`w-[112px] shrink-0 !px-2 ${showStop ? '' : 'invisible'}`} variant="outline" size="sm" disabled={!showStop || props.isBatchSaving || deviceBusy} tabIndex={showStop ? 0 : -1} aria-hidden={!showStop} onClick={props.isLocating ? props.onStopLocate : props.activeScanType === 'batch' ? props.onStopBatch : props.onStopScan}>Stop {props.isLocating ? 'finding' : 'scan'}</Button>
+          </div>
           <main id="main-content" ref={mainRef} tabIndex={-1} className="relative min-h-0 min-w-0 flex-1 overflow-hidden outline-none">
           {activeTab === 1 && (
             <ScannerTab 
@@ -173,6 +174,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
               isBusy={props.isScanning || props.isBatchSaving || props.isFileTransferring || deviceBusy}
               tags={props.tags}
               targetRssi={props.targetRssi}
+              signalState={props.locateSignalState}
               isLocating={props.isLocating}
               targetEpc={locateEpc}
               setTargetEpc={setLocateEpc}
@@ -182,11 +184,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
           {activeTab === 3 && (
             <OperationsTab 
+              tags={props.tags}
+              onOpenScanner={() => selectTab(1)}
               isBusy={operationActive || props.isFileTransferring}
               onWriteEpc={props.onWriteEpc}
               onWriteData={props.onWriteData}
               writeStatus={props.writeStatus}
-              writeMessage={props.writeMessage}
               isConnected={props.status === 'connected'}
             />
           )}

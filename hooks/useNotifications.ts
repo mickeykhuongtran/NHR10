@@ -5,7 +5,7 @@ export const NOTICE_DURATION_MS = 4200;
 export const ERROR_DURATION_MS = 6500;
 
 export const isUserNotice = (entry: LogEntry) => entry.type === 'error' || (
-  entry.type === 'info' && /connected|disconnect|reconnect|saved|success|failed|offline|popup sent|updated|applied/i.test(entry.message)
+  entry.type === 'info' && (Boolean(entry.notice) || /connected|disconnect|reconnect|saved|success|failed|offline|popup sent|updated|applied/i.test(entry.message))
 );
 
 /** Log traffic must never own or cancel the lifetime of a visible notification. */
@@ -22,7 +22,8 @@ export function useNotifications(logs: LogEntry[]) {
       if (isUserNotice(entry)) latest = entry;
     }
     if (!latest) return;
-    const key = `${latest.type}:${latest.message}`;
+    // Each intentional write attempt gets feedback, even when its result repeats.
+    const key = latest.notice?.id ?? `${latest.type}:${latest.message}`;
     // Repeated reconnect/errors must not pin a toast to the screen either.
     if (lastMessage.current.key === key && Date.now() - lastMessage.current.at < 10000) return;
     lastMessage.current = { key, at: Date.now() };

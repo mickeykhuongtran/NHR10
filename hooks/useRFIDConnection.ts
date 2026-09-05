@@ -111,8 +111,8 @@ export const useRFIDConnection = () => {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
-    setLogs(prev => [...prev, { timestamp: Date.now(), message, type }].slice(-1000));
+  const addLog = useCallback((message: string, type: LogEntry['type'] = 'info', notice?: LogEntry['notice']) => {
+    setLogs(prev => [...prev, { timestamp: Date.now(), message, type, ...(notice ? { notice } : {}) }].slice(-1000));
   }, []);
 
   const clearLogs = useCallback(() => {

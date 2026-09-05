@@ -332,7 +332,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ isConnected, isBusy, s
       />
 
       <p className="text-sm leading-6 text-slate-500">Read retrieves the current value. Apply sends a change to the reader. Save configuration keeps the applied RF settings after a restart.</p>
-      {isBusy && <p role="status" className="text-sm text-amber-700">Finish the active operation before changing device settings.</p>}
       {actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}
       <fieldset disabled={!isConnected || isBusy || actionPending} aria-label="Device configuration" className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <SettingsCard actionId="power" activeActionKey={activeActionKey} title="Power" subtitle="RF output">

@@ -63,7 +63,6 @@ export const DebugTab: React.FC<DebugTabProps> = ({ logs, settings, status, isBu
       </div>
     </details>
     {actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}
-    {isBusy && <p className="text-sm text-amber-700">Finish the active operation to refresh device settings or run a display test. Logs remain available below.</p>}
     <section className="flex min-h-[360px] flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><h2 className="text-sm font-semibold">Communication log</h2><p className="mt-1 text-xs text-slate-500">{visibleLogs.length} shown · {logs.length} retained · latest 1,000 events</p></div><button className="text-action !text-slate-500 disabled:opacity-40" disabled={!logs.length} onClick={onClearLogs}>Clear log</button></div>
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3">

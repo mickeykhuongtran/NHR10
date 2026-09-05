@@ -31,6 +31,8 @@ const App: React.FC = () => {
   // --- Operation State (Write) ---
   const [writeStatus, setWriteStatus] = useState<WriteStatus>('idle');
   const [writeMessage, setWriteMessage] = useState('');
+  const writeAttemptRef = useRef(0);
+  const pendingWriteRef = useRef<number | null>(null);
   const [commandPending, setCommandPending] = useState(false);
   const commandPendingRef = useRef(false);
   const [batchSaveInfo, setBatchSaveInfo] = useState<BatchSaveInfo>(DEFAULT_BATCH_SAVE_INFO);
@@ -38,7 +40,7 @@ const App: React.FC = () => {
   const isBatchSaving = batchSaveInfo.state === 'saving';
 
   const runOperation = async (action: () => Promise<void>) => {
-    if (commandPendingRef.current || connection.status !== 'connected') return;
+    if (commandPendingRef.current || pendingWriteRef.current !== null || connection.status !== 'connected') return;
     commandPendingRef.current = true;
     setCommandPending(true);
     try { await action(); } finally {
@@ -47,22 +49,31 @@ const App: React.FC = () => {
     }
   };
 
+  const finishWrite = useCallback((status: 'success' | 'error', message: string) => {
+    const attempt = pendingWriteRef.current;
+    if (attempt === null) return;
+    pendingWriteRef.current = null;
+    setWriteStatus(status);
+    setWriteMessage(message);
+    connection.addLog(message, status === 'success' ? 'info' : 'error', {
+      id: `write-${attempt}`,
+      title: status === 'success' ? 'Write confirmed' : 'Write needs attention',
+    });
+  }, [connection.addLog]);
+
   useEffect(() => {
     if (writeStatus !== 'pending') return;
     const timer = window.setTimeout(() => {
-      setWriteStatus('error');
-      setWriteMessage('No write response received. Scan the tag to verify its data before retrying.');
-      connection.addLog('Write response timed out; verify the tag before retrying', 'error');
+      finishWrite('error', 'No write response received. Scan the tag to verify its data before retrying.');
     }, 10000);
     return () => window.clearTimeout(timer);
-  }, [writeStatus, connection.addLog]);
+  }, [writeStatus, finishWrite]);
 
   useEffect(() => {
     if (connection.status !== 'connected' && connection.status !== 'connecting' && writeStatus === 'pending') {
-      setWriteStatus('error');
-      setWriteMessage('Connection lost before confirmation. Scan the tag to verify its data.');
+      finishWrite('error', 'Connection lost before write confirmation. Scan the tag to verify its data before retrying.');
     }
-  }, [connection.status, writeStatus]);
+  }, [connection.status, writeStatus, finishWrite]);
 
   const clearBatchSavingTimer = useCallback(() => {
     if (batchSavingTimerRef.current !== null) {
@@ -114,26 +125,16 @@ const handleDataReceived = useCallback((data: any) => {
       scan.handleDataReceived(data);
     }
 
-    // 3. GUARD BẢO VỆ FIND MODE:
-    // Chỉ truyền gói F (tín hiệu định vị) xuống khi isLocating đang là true
-    if (data.cmd === 'F') {
-      if (locate.isLocating) {
-        locate.handleDataReceived(data);
-      }
-    } else {
-      locate.handleDataReceived(data);
-    }
+    // The locate hook guards the active session and target synchronously,
+    // including a response arriving before React renders the new state.
+    locate.handleDataReceived(data);
 
     // 4. Write Responses
     if (data.cmd === 'WE' || data.cmd === 'WD') {
         if (data.status === 'ok') {
-            setWriteStatus('success');
-            setWriteMessage('Operation Successful');
-            connection.addLog('Write Success', 'info');
+            finishWrite('success', 'The reader confirmed the write. Scan the tag again to verify its data.');
         } else {
-            setWriteStatus('error');
-            setWriteMessage(`Failed: ${data.code || 'Unknown Error'}`);
-            connection.addLog(`Write Failed: ${data.code}`, 'error');
+            finishWrite('error', `Write failed (${data.code ?? data.msg ?? 'unknown error'}). Check the target tag and scan its data before retrying.`);
         }
     }
 
@@ -199,7 +200,7 @@ const handleDataReceived = useCallback((data: any) => {
         connection.addLog(`Bluetooth name read failed: ${data.msg ?? data.code ?? 'unknown_error'}`, 'error');
       }
     }
-  }, [connection, scan, locate, markBatchSaving, clearBatchSaving]);
+  }, [connection, scan, locate, markBatchSaving, clearBatchSaving, finishWrite]);
 
   useEffect(() => {
     if (fileTransfer.transferStatus === 'saving') {
@@ -332,27 +333,24 @@ const handleDataReceived = useCallback((data: any) => {
     }
   };
 
-  const handleWriteEpc = async (targetEpc: string, newEpc: string, password?: string) => {
+  const writeTag = async (action: () => Promise<void>) => {
+    if (pendingWriteRef.current !== null || commandPendingRef.current || connection.status !== 'connected' || scan.isScanning || locate.isLocating || isBatchSaving || fileTransfer.isFileTransferring) return;
+    const attempt = ++writeAttemptRef.current;
+    pendingWriteRef.current = attempt;
     setWriteStatus('pending');
     setWriteMessage('');
     try {
-      await bleService.writeEpc(targetEpc, newEpc, password);
+      await action();
     } catch (e: any) {
-      setWriteStatus('error');
-      setWriteMessage(e.message);
+      if (pendingWriteRef.current === attempt) finishWrite('error', `Write command failed: ${e.message}. Scan the tag to verify its data before retrying.`);
     }
   };
 
-  const handleWriteData = async (epc: string, mem: number, ptr: number, data: string, password?: string) => {
-    setWriteStatus('pending');
-    setWriteMessage('');
-    try {
-      await bleService.writeData(epc, mem, ptr, data, password);
-    } catch (e: any) {
-      setWriteStatus('error');
-      setWriteMessage(e.message);
-    }
-  };
+  const handleWriteEpc = (targetEpc: string, newEpc: string, password?: string) =>
+    writeTag(() => bleService.writeEpc(targetEpc, newEpc, password));
+
+  const handleWriteData = (epc: string, mem: number, ptr: number, data: string, password?: string) =>
+    writeTag(() => bleService.writeData(epc, mem, ptr, data, password));
 
   const handleDownloadLogs = () => {
     try {
@@ -429,6 +427,7 @@ const handleDataReceived = useCallback((data: any) => {
       onLocate={(epc) => runOperation(() => locate.startLocate(epc))}
       onStopLocate={() => runOperation(locate.stopLocate)}
       targetRssi={locate.targetRssi}
+      locateSignalState={locate.signalState}
       isLocating={locate.isLocating}
       
       onWriteEpc={handleWriteEpc}
